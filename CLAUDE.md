@@ -78,10 +78,12 @@ adding code that is loaded by name.
 
 - `CryptoManager`, `KeyDerivation`, `GeneratePasswordUseCase`, and
   `PasswordStrengthEvaluator` are pure JVM — no Robolectric needed.
-- `android.util.Base64` and `org.json` are **not** available in bare unit tests. Use
-  Robolectric, or add `org.json:json` as a test dependency.
-- `MasterPasswordManager` constructs `EncryptedSharedPreferences` inline; it needs the
-  `SecurePrefs` seam to be testable off-device.
+- `org.json` is stubbed in bare unit tests; the real implementation is on the test
+  classpath via `org.json:json`. Prefer `java.util.Base64` over `android.util.Base64` in
+  new code — identical output for this app's flags, and not a stub in tests.
+- `MasterPasswordManager` and `BiometricAuthManager` take a `SecurePrefs`; use
+  `FakeSecurePrefs` off-device. `FakeBiometricKeystore` stands in for the Android Keystore
+  and is backed by real AES-GCM, so replacing a key genuinely breaks prior material.
 - Room migrations need `androidx.room:room-testing` and run as instrumented tests.
 
 ## Conventions
