@@ -5,7 +5,7 @@ changes as migrations, not edits.
 
 ## Room schema — `vault.db`
 
-Database version **2**, `exportSchema = true` (committed under `app/schemas`),
+Database version **3**, `exportSchema = true` (committed under `app/schemas`),
 migrations in `VaultMigrations`.
 
 ### Table `credentials`
@@ -17,7 +17,7 @@ migrations in `VaultMigrations`.
 | `iv` | `BLOB` | 12-byte GCM nonce for this row |
 | `createdAt` | `INTEGER` | Epoch millis, device local clock |
 | `updatedAt` | `INTEGER` | Any write to the row: edit, pin toggle, re-encryption sweep |
-| `passwordChangedAt` | `INTEGER` | When the password itself last changed. Added in v2; backfilled from `updatedAt` |
+| `passwordChangedAt` | `INTEGER` | When the password itself last changed. Added in v2; backfilled from `createdAt` in v3 |
 | `syncedAt` | `INTEGER?` | Epoch millis of last successful push/pull; `NULL` = never synced |
 | `isDeleted` | `INTEGER` | Tombstone flag; rows are soft-deleted and never purged |
 
@@ -25,10 +25,19 @@ migrations in `VaultMigrations`.
 because `ByteArray` identity comparison would break list diffing.
 
 Two problems from the v1 schema were addressed together in v2: schema export is now on
-and both versions are committed, and `passwordChangedAt` separates password rotation from
-row writes (#29). The backfill sets `passwordChangedAt` = `updatedAt` for pre-existing
-rows, which is an upper bound rather than the truth — the real date was never recorded,
-so entries migrated from v1 may report as newer than they are.
+and every version is committed, and `passwordChangedAt` separates password rotation from
+row writes (#29).
+
+The backfill took two attempts, which is worth recording. v2 sourced it from `updatedAt`,
+reasoning that it was an upper bound on when the password changed. It was — until the
+master-password re-encryption sweep rewrote `updatedAt` on every row, which is exactly
+what happened while testing that sweep. v3 re-backfills from `createdAt`, which the sweep
+leaves alone. `createdAt` is a *lower* bound: exactly right for an entry never rotated,
+too old for the rest. For a feature that exists to prompt rotation, over-warning is the
+better way to be wrong.
+
+Rows re-encrypted by a key change or the vault-key conversion carry `passwordChangedAt`
+across untouched — re-encryption is not a rotation.
 
 ## Credential payload JSON
 
@@ -115,10 +124,16 @@ live, never-synced entries — which is correct behaviour, just undocumented.
 
 ### Import modes
 
+Both formats share these, implemented in `ImportVaultUseCase`:
+
 | Mode | Behaviour |
 | --- | --- |
-| Merge | For each imported row, insert only if `id` is absent locally. Existing rows win. |
-| Replace | Soft-delete **every** local row, then upsert all imported rows. Local-only entries survive as tombstones and become unreachable. |
+| Merge | Keeps existing live entries; only ids absent locally are added. |
+| Replace | Writes the backup's entries and retires anything it does not mention — in the **same transaction**, so a failure part-way cannot leave the vault emptied and unfilled. |
+
+Every imported credential is re-encrypted under the receiving vault's key with a fresh IV,
+whichever mode and whichever format. `syncedAt` is never exported; imported rows arrive as
+never-synced.
 
 ## Backup file — format v2
 
