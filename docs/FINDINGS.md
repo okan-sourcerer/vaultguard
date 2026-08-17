@@ -172,7 +172,7 @@ Full analysis in [SYNC.md](SYNC.md).
 | 33 | Generator cannot return a password to Add/Edit | `NavGraph.kt:80`, `AddEditScreen.kt:50` | **fixed** (chunk 11) |
 | 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8) |
 | 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | **fixed** (chunk 8) |
-| 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | **fixed** (chunk 11) |
+| 36 | Clipboard worker wipes whatever was copied since | `security/SecureClipboard.kt` | **fixed** (chunk 11, corrected in 13a) |
 | 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | **fixed** (chunk 8a) |
 | 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | **fixed** (chunk 3) |
 | 39 | No "forgetting this loses everything" warning at setup | `setup/SetupScreen.kt` | **fixed** (chunk 11) |
@@ -245,6 +245,22 @@ plugin own it.
 unused `KeyDerivation`; `CredentialRepository.search()` is dead code;
 `CircularProgressIndicator()` has no size modifier inside buttons in Setup and Add/Edit;
 Timber logging runs unguarded on every Settings recomposition.
+
+### Regression: the #36 fix stopped the clipboard clearing at all
+
+The first attempt tagged the clip with a token and skipped clearing when it did not match.
+It always failed to match: Android 10's clipboard restriction covers
+`getPrimaryClipDescription()` too, not only `getPrimaryClip()`, so a background worker
+reads `null` and concluded every time that the clipboard belonged to someone else.
+
+Passwords stayed on the clipboard indefinitely — a worse failure than the one being fixed,
+and one that only shows up by using the app, since nothing in the code says the read is
+restricted.
+
+Corrected by inverting the default: clear unless the clip is *positively* identified as
+another app's. An in-process timer was added alongside the worker, because WorkManager
+schedules on its own terms and a thirty-second security window deserves better than
+best-effort timing.
 
 ## Documentation defects (fixed 2026-08-17)
 

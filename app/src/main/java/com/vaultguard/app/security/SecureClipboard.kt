@@ -9,6 +9,11 @@ import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -26,17 +31,15 @@ class SecureClipboard @Inject constructor(
         internal const val DATA_TOKEN = "token"
     }
 
+    private val scope = CoroutineScope(Dispatchers.Main)
+    private var pendingClear: Job? = null
+
     /**
-     * Copies [text], then clears it again 30 seconds later — but only if it is still the
-     * thing on the clipboard.
+     * Copies [text] and clears it again after 30 seconds.
      *
-     * The clear used to fire unconditionally, so copying a password and then copying
-     * anything else within the window meant VaultGuard wiped the *other* thing (finding
-     * #36). A token in the clip description identifies our own copy.
-     *
-     * The token is why this cannot simply compare the text: from Android 10 an app may not
-     * read clipboard **contents** unless it has focus, and a background worker never does.
-     * The clip *description* stays readable, so the marker goes there.
+     * The clip is tagged with a token so the clear can tell VaultGuard's own copy from
+     * whatever the user put on the clipboard afterwards (finding #36) — see
+     * [clearIfStillOurs] for how far that goes, which is not as far as one would like.
      */
     fun copyWithAutoExpiry(label: String, text: String) {
         val token = System.nanoTime().toString()
@@ -49,6 +52,21 @@ class SecureClipboard @Inject constructor(
             }
         }
         clipboard.setPrimaryClip(clip)
+
+        // Two timers, because neither alone is good enough.
+        //
+        // WorkManager survives the process being killed, but it schedules on its own terms
+        // and can run well past the requested delay — fine for housekeeping, not for a
+        // window the user was told is thirty seconds.
+        //
+        // The in-process timer is punctual but dies with the process. Whichever fires first
+        // does the work; the other then finds an empty or foreign clipboard and does
+        // nothing.
+        pendingClear?.cancel()
+        pendingClear = scope.launch {
+            delay(TimeUnit.SECONDS.toMillis(CLEAR_DELAY_SECONDS))
+            clearIfStillOurs(context, token)
+        }
 
         val workManager = WorkManager.getInstance(context)
         workManager.cancelAllWorkByTag(WORK_TAG)
@@ -63,10 +81,8 @@ class SecureClipboard @Inject constructor(
 }
 
 /**
- * Clears the clipboard, if what is on it is still what VaultGuard put there.
- *
- * WorkManager rather than a delayed handler, so it survives the process being killed
- * before the timer elapses.
+ * Backstop for [SecureClipboard]'s in-process timer: survives the process being killed
+ * before the window elapses. Delegates to the same routine so both paths behave alike.
  */
 class ClearClipboardWorker(
     context: Context,
@@ -74,27 +90,45 @@ class ClearClipboardWorker(
 ) : Worker(context, params) {
 
     override fun doWork(): Result {
-        val expected = inputData.getString(SecureClipboard.DATA_TOKEN) ?: return Result.success()
-        val clipboard = applicationContext
-            .getSystemService(android.content.ClipboardManager::class.java)
-            ?: return Result.success()
-
-        // Only the description is legible to a background app; contents are not.
-        val actual = clipboard.primaryClipDescription
-            ?.extras
-            ?.getString(SecureClipboard.EXTRA_TOKEN)
-
-        if (actual != expected) {
-            Timber.d("Clipboard holds something else now; leaving it alone")
-            return Result.success()
-        }
-
-        runCatching { clipboard.clearPrimaryClip() }
-            .onFailure {
-                // clearPrimaryClip is API 28+, which minSdk guarantees, but a manufacturer
-                // build refusing it should not crash a background worker.
-                Timber.w(it, "Could not clear the clipboard")
-            }
+        clearIfStillOurs(applicationContext, inputData.getString(SecureClipboard.DATA_TOKEN))
         return Result.success()
     }
+}
+
+/**
+ * Clears the clipboard unless it can be positively identified as somebody else's.
+ *
+ * The token in the clip description is there so that copying something else within the
+ * window is not wiped along with the password (finding #36). Reading it back only works
+ * while the app has focus: from Android 10 the clipboard restriction covers
+ * `getPrimaryClipDescription()` and `hasPrimaryClip()`, not merely `getPrimaryClip()`, and
+ * neither a background worker nor a backgrounded app has focus.
+ *
+ * The first attempt at #36 read an unreadable description as "not ours" and skipped
+ * clearing — which on Android 10 and above meant it *never* cleared, leaving passwords on
+ * the clipboard indefinitely. That is the failure this class exists to prevent, and a worse
+ * one than the collateral it was guarding against.
+ *
+ * So the test is inverted: skip only on a **positive** identification of another clip. When
+ * the description cannot be read, clear. On most devices that means the token rarely gets
+ * consulted and something copied inside the window may be lost; the alternative is a
+ * password sitting on the clipboard for the rest of the day.
+ */
+internal fun clearIfStillOurs(context: Context, expectedToken: String?) {
+    val clipboard = context.getSystemService(android.content.ClipboardManager::class.java) ?: return
+
+    val description = clipboard.primaryClipDescription
+    val token = description?.extras?.getString(SecureClipboard.EXTRA_TOKEN)
+
+    if (description != null && token != null && token != expectedToken) {
+        Timber.d("Clipboard now holds another app's clip; leaving it alone")
+        return
+    }
+
+    // clearPrimaryClip is API 28+, which minSdk guarantees, but OEM builds have been known
+    // to refuse it. Overwriting with an empty clip is the fallback, and neither path may
+    // throw out of a background worker.
+    runCatching { clipboard.clearPrimaryClip() }
+        .recoverCatching { clipboard.setPrimaryClip(ClipData.newPlainText("", "")) }
+        .onFailure { Timber.w(it, "Could not clear the clipboard") }
 }
