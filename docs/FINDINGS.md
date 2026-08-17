@@ -135,7 +135,7 @@ re-encryption sweep. Pinning an entry resets its displayed "password age" to *To
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
 | 41 | ProGuard keeps reference packages the app does not use | `app/proguard-rules.pro` | open |
-| 42 | `default_web_client_id` hand-declared *and* plugin-generated | `res/values/strings.xml:3` | open |
+| 42 | `default_web_client_id` hand-declared *and* plugin-generated | `res/values/strings.xml:3` | open (verified: not a build breaker) |
 | 43 | `google-services.json` not gitignored | `.gitignore` | open |
 | 44 | No real tests — only the two IDE templates | `app/src/test`, `app/src/androidTest` | open |
 | 45 | Deprecated `GoogleSignIn` API; `biometric` on an alpha version | `GoogleAuthManager.kt`, `libs.versions.toml:22` | open |
@@ -145,6 +145,16 @@ re-encryption sweep. Pinning an entry resets its displayed "password age" to *To
 `-keep class org.signal.argon2.**` but the app uses BouncyCastle's `Argon2BytesGenerator`,
 which has no keep rule at all. With minification enabled this is a likely release-only
 crash that never appears in debug builds.
+
+**#42** — verified 2026-08-17 by building and inspecting the merged resources. The string
+is declared in **both** `res/values/strings.xml` and the plugin-generated
+`build/generated/res/processDebugGoogleServices/values/values.xml`, currently with
+identical values. AGP gives the main source set priority over generated resources, so the
+build succeeds and behaviour is correct today. The hazard is latent rather than immediate:
+if the Firebase project is ever changed, `google-services.json` updates but the
+hand-written string silently keeps winning with a stale client ID, producing a sign-in
+failure with no obvious cause. Fix is to delete the line from `strings.xml` and let the
+plugin own it.
 
 **#46** — `SecureClipboard` is `@Singleton` but hand-constructed in two Compose screens;
 `ClipboardManager.kt` contains no class of that name; `ExportVaultUseCase` injects an

@@ -111,6 +111,32 @@ vault. No production behaviour changes.
 
 ---
 
+## Chunk 1a — Cleartext migration export (temporary)
+
+**Goal:** get the vault out of the app and into another password manager before the risky
+chunks begin. A v1 encrypted backup is not sufficient — it cannot be restored once the
+salt changes, which is the exact scenario a backup exists for.
+
+**Findings:** none directly; a stopgap for #3 until chunk 7 lands.
+
+**Delivered:**
+- `domain/usecase/migration/CleartextCsv.kt` — RFC 4180 reader/writer in Bitwarden's CSV
+  column layout, which KeePassXC, 1Password and Proton Pass can also import.
+- `domain/usecase/migration/ExportCleartextVaultUseCase.kt` — runs off the main thread and
+  **refuses to write an empty file**, so a decryption failure cannot masquerade as a
+  successful backup.
+- Settings → "Migration (temporary)" → Export Unencrypted CSV, behind a confirmation
+  dialog that spells out the exposure.
+- `CleartextCsvTest` — 18 tests, concentrated on escaping. Passwords containing commas,
+  quotes, and newlines round-trip; a note with embedded newlines does not split a record.
+
+**Removal:** delete the `migration` package, the `SettingsViewModel.onExportCleartext`
+method, the Settings section, and `CleartextCsvTest`. Every touch point is marked
+`TEMPORARY — CLEARTEXT MIGRATION AID`, so `git grep "CLEARTEXT MIGRATION"` finds all of
+them. Do this once chunk 7 lands.
+
+---
+
 ## Chunk 2 — Stop the vault from being destroyed
 
 **Goal:** remove the armed data-destruction path.
@@ -358,8 +384,9 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 
 | Chunk | Findings | Status |
 | --- | --- | --- |
-| 0 — Prerequisites | — | not started |
-| 1 — Characterization tests | #44 (partial) | not started |
+| 0 — Prerequisites | #43 | **done** — repo initialised, baseline commit, `google-services.json` untracked |
+| 1 — Characterization tests | #44 (partial) | **done** — 57 tests passing |
+| 1a — Cleartext migration export | temporary aid for #3 | **done** — awaiting the owner's backup |
 | 2 — Stop destruction | #1, #2 | not started |
 | 3 — Visibility | #40, #7, #38, #31, #32 | not started |
 | 4 — Biometric lifecycle | #6, #8 | not started |

@@ -45,6 +45,12 @@ android {
             useLegacyPackaging = false
         }
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.testLogging { events("passed", "skipped", "failed") } }
+        }
+    }
 }
 
 ksp {
@@ -105,6 +111,10 @@ dependencies {
 
     // Test
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
+    testImplementation(libs.json)
+    testImplementation(libs.bouncycastle)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

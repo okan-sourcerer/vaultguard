@@ -89,6 +89,8 @@ fun SettingsScreen(
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    // TEMPORARY — cleartext migration aid, remove with the `migration` package.
+    var showCleartextWarning by remember { mutableStateOf(false) }
 
     // Google Sign-In launcher
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -115,6 +117,13 @@ fun SettingsScreen(
         }
     }
 
+    // TEMPORARY — cleartext migration aid, remove with the `migration` package.
+    val cleartextExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let { viewModel.onExportCleartext(it) }
+    }
+
     // Refresh autofill state when returning from system settings
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -138,6 +147,33 @@ fun SettingsScreen(
             onConfirm = { current, new ->
                 showChangePasswordDialog = false
                 viewModel.onChangeMasterPassword(current, new)
+            }
+        )
+    }
+
+    // TEMPORARY — cleartext migration aid, remove with the `migration` package.
+    if (showCleartextWarning) {
+        AlertDialog(
+            onDismissRequest = { showCleartextWarning = false },
+            title = { Text("Export unencrypted?") },
+            text = {
+                Text(
+                    "This writes every password in your vault to a plain CSV file with no " +
+                        "encryption. Anything that can read the file can read your passwords.\n\n" +
+                        "Use it only to move into another password manager, then delete the " +
+                        "file and empty your device's trash. Treat every password in it as " +
+                        "exposed until you have done so.\n\n" +
+                        "Do not save it to a cloud-synced folder."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showCleartextWarning = false
+                    cleartextExportLauncher.launch("vaultguard_cleartext.csv")
+                }) { Text("I understand, export") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCleartextWarning = false }) { Text("Cancel") }
             }
         )
     }
@@ -328,6 +364,31 @@ fun SettingsScreen(
                 ) {
                     Text("Import Vault")
                 }
+            }
+
+            // TEMPORARY — cleartext migration aid (finding #3).
+            // Remove together with the `migration` package once the move is complete.
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Migration (temporary)",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Encrypted backups cannot currently be restored after the master password " +
+                    "or salt changes. Until that is fixed, export unencrypted and keep a copy " +
+                    "in another password manager.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showCleartextWarning = true },
+                enabled = !uiState.isLoading,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Export Unencrypted CSV")
             }
 
             // Cloud Sync section

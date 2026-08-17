@@ -89,53 +89,14 @@ class CredentialRepositoryImpl @Inject constructor(
             )
             val json = String(decrypted, Charsets.UTF_8)
             decrypted.fill(0)
-            jsonToCredential(json, entity)
+            CredentialPayloadCodec.decode(json, entity.id, entity.createdAt, entity.updatedAt)
         } catch (e: Exception) {
+            // TODO(#40): swallowing this makes an unreadable vault look like an empty one.
+            //  Chunk 3 replaces it with a surfaced decrypt-failure count.
             null
         }
     }
 
-    private fun credentialToJson(credential: Credential): String {
-        return JSONObject().apply {
-            put("siteName", credential.siteName)
-            put("appName", credential.appName)
-            put("url", credential.url)
-            put("username", credential.username)
-            put("password", credential.password)
-            put("notes", credential.notes)
-            put("category", credential.category)
-            put("tags", JSONArray(credential.tags))
-            put("isPinned", credential.isPinned)
-            put("linkedPackages", JSONArray(credential.linkedPackages))
-            put("linkedDomains", JSONArray(credential.linkedDomains))
-        }.toString()
-    }
-
-    private fun jsonToCredential(json: String, entity: CredentialEntity): Credential {
-        val obj = JSONObject(json)
-        val tags = parseJsonStringArray(obj.optJSONArray("tags"))
-        val linkedPackages = parseJsonStringArray(obj.optJSONArray("linkedPackages"))
-        val linkedDomains = parseJsonStringArray(obj.optJSONArray("linkedDomains"))
-        return Credential(
-            id = entity.id,
-            siteName = obj.optString("siteName", ""),
-            appName = obj.optString("appName", ""),
-            url = obj.optString("url", ""),
-            username = obj.optString("username", ""),
-            password = obj.optString("password", ""),
-            notes = obj.optString("notes", ""),
-            category = obj.optString("category", ""),
-            tags = tags,
-            isPinned = obj.optBoolean("isPinned", false),
-            linkedPackages = linkedPackages,
-            linkedDomains = linkedDomains,
-            createdAt = entity.createdAt,
-            updatedAt = entity.updatedAt
-        )
-    }
-
-    private fun parseJsonStringArray(array: JSONArray?): List<String> {
-        if (array == null) return emptyList()
-        return (0 until array.length()).map { array.getString(it) }
-    }
+    private fun credentialToJson(credential: Credential): String =
+        CredentialPayloadCodec.encode(credential)
 }
