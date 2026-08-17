@@ -17,7 +17,6 @@ import com.vaultguard.app.domain.usecase.backup.ExportVaultUseCase
 import com.vaultguard.app.domain.usecase.backup.ImportVaultUseCase
 import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
 import com.vaultguard.app.domain.usecase.backup.WrongBackupPasswordException
-import com.vaultguard.app.domain.usecase.migration.ExportCleartextVaultUseCase
 import com.vaultguard.app.security.BiometricAuthManager
 import com.vaultguard.app.security.GoogleAuthManager
 import com.vaultguard.app.security.GoogleSignInResult
@@ -70,8 +69,6 @@ class SettingsViewModel @Inject constructor(
     private val masterPasswordPolicy: MasterPasswordPolicy,
     private val exportVaultUseCase: ExportVaultUseCase,
     private val importVaultUseCase: ImportVaultUseCase,
-    // TEMPORARY — cleartext migration aid, remove with the `migration` package.
-    private val exportCleartextVaultUseCase: ExportCleartextVaultUseCase,
     private val changeMasterPasswordUseCase: ChangeMasterPasswordUseCase,
     private val googleAuthManager: GoogleAuthManager,
     private val syncService: FirebaseSyncService,
@@ -178,28 +175,6 @@ class SettingsViewModel @Inject constructor(
     fun onDisableBiometric() {
         biometricAuthManager.disableBiometric()
         _uiState.value = _uiState.value.copy(biometricEnabled = false, message = "Biometric unlock disabled")
-    }
-
-    /**
-     * TEMPORARY — CLEARTEXT MIGRATION AID (finding #3). Remove with the `migration` package.
-     */
-    fun onExportCleartext(uri: Uri) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            try {
-                val count = exportCleartextVaultUseCase(uri)
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    message = "Exported $count credentials in cleartext. Import them elsewhere, " +
-                        "then delete the file."
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = "Cleartext export failed: ${e.message}"
-                )
-            }
-        }
     }
 
     fun onExport(uri: Uri, backupPassword: String) {

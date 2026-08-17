@@ -116,29 +116,24 @@ vault. No production behaviour changes.
 
 ---
 
-## Chunk 1a — Cleartext migration export (temporary)
+## Chunk 1a — Cleartext migration export (temporary) — **removed**
 
 **Goal:** get the vault out of the app and into another password manager before the risky
-chunks begin. A v1 encrypted backup is not sufficient — it cannot be restored once the
-salt changes, which is the exact scenario a backup exists for.
+chunks begin. A v1 encrypted backup was not sufficient — it could not be restored once the
+salt changed, which is the exact scenario a backup exists for.
 
-**Findings:** none directly; a stopgap for #3 until chunk 7 lands.
+**Findings:** none directly; a stopgap for #3 until chunk 7 landed.
 
-**Delivered:**
-- `domain/usecase/migration/CleartextCsv.kt` — RFC 4180 reader/writer in Bitwarden's CSV
-  column layout, which KeePassXC, 1Password and Proton Pass can also import.
-- `domain/usecase/migration/ExportCleartextVaultUseCase.kt` — runs off the main thread and
-  **refuses to write an empty file**, so a decryption failure cannot masquerade as a
-  successful backup.
-- Settings → "Migration (temporary)" → Export Unencrypted CSV, behind a confirmation
-  dialog that spells out the exposure.
-- `CleartextCsvTest` — 18 tests, concentrated on escaping. Passwords containing commas,
-  quotes, and newlines round-trip; a note with embedded newlines does not split a record.
+**What it was:** an RFC 4180 CSV writer in Bitwarden's column layout, a use case that ran
+off the main thread and refused to write an empty file, and a Settings →
+"Migration (temporary)" → Export Unencrypted CSV button behind a confirmation dialog that
+spelled out the exposure. 18 tests, concentrated on escaping.
 
-**Removal:** delete the `migration` package, the `SettingsViewModel.onExportCleartext`
-method, the Settings section, and `CleartextCsvTest`. Every touch point is marked
-`TEMPORARY — CLEARTEXT MIGRATION AID`, so `git grep "CLEARTEXT MIGRATION"` finds all of
-them. Do this once chunk 7 lands.
+**Removed** once backup v2 (chunk 7) had landed and been verified: the `migration` package,
+`SettingsViewModel.onExportCleartext`, the Settings section and its dialog, and
+`CleartextCsvTest`. Every touch point had been marked
+`TEMPORARY — CLEARTEXT MIGRATION AID` for exactly this purpose. Nothing in the app writes
+a plaintext vault any more — the only way out is a v2 encrypted backup.
 
 ---
 
@@ -391,7 +386,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | --- | --- | --- |
 | 0 — Prerequisites | #43 | **done** — repo initialised, baseline commit, `google-services.json` untracked |
 | 1 — Characterization tests | #44 (partial) | **done** — 57 tests passing |
-| 1a — Cleartext migration export | temporary aid for #3 | **done** — awaiting the owner's backup |
+| 1a — Cleartext migration export | temporary aid for #3 | **done, then removed** — superseded by backup v2 |
 | 2 — Stop destruction | #1, #2 | **done** — 22 tests |
 | 3 — Visibility | #40, #7, #38, #31, #32 | **done** — 35 tests |
 | 4 — Biometric lifecycle | #6, #8 | **done** — 24 tests |
