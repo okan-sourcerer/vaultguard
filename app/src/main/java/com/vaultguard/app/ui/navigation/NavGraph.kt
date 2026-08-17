@@ -9,6 +9,7 @@ import androidx.navigation.navArgument
 import com.vaultguard.app.ui.screens.addEdit.AddEditScreen
 import com.vaultguard.app.ui.screens.detail.CredentialDetailScreen
 import com.vaultguard.app.ui.screens.generator.PasswordGeneratorScreen
+import com.vaultguard.app.ui.screens.recovery.VaultRecoveryScreen
 import com.vaultguard.app.ui.screens.settings.SettingsScreen
 import com.vaultguard.app.ui.screens.setup.SetupScreen
 import com.vaultguard.app.ui.screens.unlock.UnlockScreen
@@ -26,6 +27,9 @@ sealed class Screen(val route: String) {
     }
     data object Generator : Screen("generator")
     data object Settings : Screen("settings")
+
+    /** Shown when vault.db exists but cannot be decrypted (finding #1). */
+    data object Recovery : Screen("recovery")
 }
 
 @Composable
@@ -34,6 +38,10 @@ fun NavGraph(
     startDestination: String
 ) {
     NavHost(navController = navController, startDestination = startDestination) {
+        composable(Screen.Recovery.route) {
+            VaultRecoveryScreen()
+        }
+
         composable(Screen.Setup.route) {
             SetupScreen(
                 onSetupComplete = {

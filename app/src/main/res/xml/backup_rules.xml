@@ -1,13 +1,41 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Auto-backup rules for API 30 and below. See data_extraction_rules.xml for API 31+.
+
+    The vault is excluded from backup on purpose (finding #2).
+
+    Backing it up does not merely fail to help — it actively destroys data. vault.db is
+    encrypted with a random passphrase held in vault_secure_prefs, which is itself
+    encrypted by an Android Keystore master key. Keystore material is never included in a
+    backup. So a restored device gets the database and the preferences but not the key
+    that opens them: getDatabasePassphrase() finds unreadable preferences, mints a fresh
+    random passphrase, and the restored vault.db can never be decrypted again.
+
+    Until this file said so, that combination also triggered the destructive branch in
+    DatabaseModule (finding #1), which deleted the restored vault outright.
+
+    The app's own encrypted export is the supported backup path, not Android auto-backup.
+
+    Everything not listed here is still backed up — currently just the password-generator
+    presets, which contain no secrets.
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- The vault itself, plus SQLite's journal/WAL sidecars and any quarantined copy. -->
+    <exclude domain="database" path="." />
+
+    <!-- Master password salt, verification blob, and the database passphrase. -->
+    <exclude domain="sharedpref" path="vault_secure_prefs.xml" />
+
+    <!-- Keystore-wrapped copy of the vault key. Meaningless without the Keystore key. -->
+    <exclude domain="sharedpref" path="biometric_prefs.xml" />
+
+    <!-- Sync cursors are per-install and per-UID; restoring them skips remote changes. -->
+    <exclude domain="sharedpref" path="sync_prefs.xml" />
+
+    <!-- Reveals which sites and apps the user has logged in to. -->
+    <exclude domain="sharedpref" path="autofill_dismissed_prefs.xml" />
+
+    <!-- No credential data should ever reach external storage or the cache. -->
+    <exclude domain="external" path="." />
+    <exclude domain="sharedpref" path="sync_prefs.xml.bak" />
 </full-backup-content>

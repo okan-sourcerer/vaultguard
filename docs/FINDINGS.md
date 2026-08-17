@@ -9,8 +9,8 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
-| 1 | DI deletes the entire vault on any DB-open failure | `di/DatabaseModule.kt:35-50` | open |
-| 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | open |
+| 1 | DI deletes the entire vault on any DB-open failure | `di/DatabaseModule.kt:35-50` | **fixed** (chunk 2) |
+| 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | **fixed** (chunk 2) |
 | 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | open |
 | 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open |
 | 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | open |
@@ -169,12 +169,12 @@ things the code did not do — these are load-bearing because #1 was justified b
 
 | Comment | Problem | Status |
 | --- | --- | --- |
-| `DatabaseModule.kt:31-34` "safe because a passphrase mismatch only happens on a fresh install" | False premise behind #1 | to correct with #1 |
+| `DatabaseModule.kt:31-34` "safe because a passphrase mismatch only happens on a fresh install" | False premise behind #1 | **corrected** (chunk 2) |
 | `MasterPasswordManager.kt:35` "Resets on collect" | Resets on explicit `consumeLockEvent()` | to correct |
 | `CredentialSummary.kt:4-6` "password … never sits in memory while browsing" | True for the list, false for the detail screen | to correct |
 | `BreachCheckService.kt:46` "just report unknown" | The type has no unknown state — #14 | to correct with #14 |
 | `FirebaseSyncService.kt:53-60` | Two stacked KDoc blocks; the first describes an obsolete Firestore path | to correct |
-| `res/xml/backup_rules.xml`, `data_extraction_rules.xml` | Unedited templates with real security consequences — #2 | to correct with #2 |
+| `res/xml/backup_rules.xml`, `data_extraction_rules.xml` | Unedited templates with real security consequences — #2 | **corrected** (chunk 2) |
 
 User-facing copy that contradicts behaviour is tracked as #14, #15, #16, and #3.
 

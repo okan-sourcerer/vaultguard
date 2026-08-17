@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
+import com.vaultguard.app.data.local.db.VaultDatabaseStatusHolder
 import com.vaultguard.app.security.MasterPasswordManager
 import com.vaultguard.app.ui.navigation.NavGraph
 import com.vaultguard.app.ui.navigation.Screen
@@ -28,6 +29,9 @@ class MainActivity : FragmentActivity() {
 
     @Inject
     lateinit var masterPasswordManager: MasterPasswordManager
+
+    @Inject
+    lateinit var vaultDatabaseStatusHolder: VaultDatabaseStatusHolder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +50,11 @@ class MainActivity : FragmentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val navController = rememberNavController()
                     val startDestination = when {
+                        // Takes precedence over everything: the master password lives in
+                        // preferences, so setup can look complete while the vault itself
+                        // is unopenable. Reaching the unlock screen in that state would
+                        // present an empty vault instead of an explanation (findings #1, #40).
+                        vaultDatabaseStatusHolder.isUnreadable -> Screen.Recovery.route
                         !masterPasswordManager.isSetupComplete -> Screen.Setup.route
                         !masterPasswordManager.isVaultUnlocked -> Screen.Unlock.route
                         else -> Screen.Vault.route
@@ -54,7 +63,10 @@ class MainActivity : FragmentActivity() {
                     // This handles process-death restarts where _vaultLocked resets to false but the
                     // session key is gone.
                     LaunchedEffect(Unit) {
-                        if (masterPasswordManager.isSetupComplete && !masterPasswordManager.isVaultUnlocked) {
+                        if (!vaultDatabaseStatusHolder.isUnreadable &&
+                            masterPasswordManager.isSetupComplete &&
+                            !masterPasswordManager.isVaultUnlocked
+                        ) {
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }
                             }
@@ -64,7 +76,7 @@ class MainActivity : FragmentActivity() {
                     // Navigate to unlock screen when vault is locked at runtime (e.g. auto-lock timeout)
                     val vaultLocked by masterPasswordManager.vaultLocked.collectAsState()
                     LaunchedEffect(vaultLocked) {
-                        if (vaultLocked) {
+                        if (vaultLocked && !vaultDatabaseStatusHolder.isUnreadable) {
                             masterPasswordManager.consumeLockEvent()
                             navController.navigate(Screen.Unlock.route) {
                                 popUpTo(0) { inclusive = true }

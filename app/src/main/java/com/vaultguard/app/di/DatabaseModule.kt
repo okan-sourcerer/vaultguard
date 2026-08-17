@@ -3,6 +3,7 @@ package com.vaultguard.app.di
 import android.content.Context
 import androidx.room.Room
 import com.vaultguard.app.data.local.db.VaultDatabase
+import com.vaultguard.app.data.local.db.VaultDatabaseHealthCheck
 import com.vaultguard.app.data.local.db.dao.CredentialDao
 import com.vaultguard.app.security.MasterPasswordManager
 import dagger.Module
@@ -10,7 +11,6 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import net.zetetic.database.sqlcipher.SQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import javax.inject.Singleton
 
@@ -22,41 +22,37 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(
         @ApplicationContext context: Context,
-        masterPasswordManager: MasterPasswordManager
+        masterPasswordManager: MasterPasswordManager,
+        healthCheck: VaultDatabaseHealthCheck
     ): VaultDatabase {
-        // getDatabasePassphrase() generates and persists a passphrase on first call,
-        // so the same key is used whether setup has completed or not.
-        val passphrase = masterPasswordManager.getDatabasePassphrase()
+        // Probe before handing out a database handle, so an unopenable vault becomes a
+        // recovery screen instead of an exception surfacing later inside a Room Flow.
+        //
+        // Idempotent — VaultGuardApp already ran this at startup.
+        //
+        // This used to delete vault.db whenever the probe threw, on the reasoning that a
+        // passphrase mismatch could only happen on a fresh install before any credential
+        // had been saved (finding #1). That reasoning was wrong. The mismatch's most
+        // likely real cause is a restored or migrated device, where vault_secure_prefs is
+        // unreadable because its Keystore master key did not come along — the vault itself
+        // is intact and the passphrase is simply gone. Deleting is the one response that
+        // turns a recoverable situation into permanent loss.
+        //
+        // Nothing here modifies the filesystem. Moving a database aside happens only via
+        // VaultDatabaseHealthCheck.quarantine(), from a confirmed user action, and renames
+        // rather than deletes.
+        healthCheck.runOnce()
 
-        // If an existing vault.db was created with a different passphrase (e.g. the old
-        // ByteArray(32) temporary key), delete it so Room can create a fresh database.
-        // This is safe because a passphrase mismatch only happens on a fresh install
-        // before any real credentials have been saved.
-        val dbFile = context.getDatabasePath("vault.db")
-        if (dbFile.exists()) {
-            var db: SQLiteDatabase? = null
-            try {
-                db = SQLiteDatabase.openDatabase(
-                    dbFile.absolutePath, passphrase, null,
-                    SQLiteDatabase.OPEN_READONLY, null
-                )
-            } catch (_: Exception) {
-                // Passphrase mismatch or corruption — delete so Room recreates a fresh DB
-                db = null
-                context.deleteDatabase("vault.db")
-            } finally {
-                try { db?.close() } catch (_: Exception) { }
-            }
-        }
-
-        val factory = SupportOpenHelperFactory(passphrase)
+        val factory = SupportOpenHelperFactory(masterPasswordManager.getDatabasePassphrase())
 
         return Room.databaseBuilder(
             context,
             VaultDatabase::class.java,
-            "vault.db"
+            VaultDatabaseHealthCheck.DATABASE_NAME
         )
             .openHelperFactory(factory)
+            // No destructive migration fallback: a failed migration must fail loudly
+            // rather than silently recreating an empty vault.
             .build()
     }
 

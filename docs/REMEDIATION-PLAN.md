@@ -387,7 +387,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 0 — Prerequisites | #43 | **done** — repo initialised, baseline commit, `google-services.json` untracked |
 | 1 — Characterization tests | #44 (partial) | **done** — 57 tests passing |
 | 1a — Cleartext migration export | temporary aid for #3 | **done** — awaiting the owner's backup |
-| 2 — Stop destruction | #1, #2 | not started |
+| 2 — Stop destruction | #1, #2 | **done** — 22 tests |
 | 3 — Visibility | #40, #7, #38, #31, #32 | not started |
 | 4 — Biometric lifecycle | #6, #8 | not started |
 | 5 — Atomicity + threading | #5, #17, #18 | not started |
