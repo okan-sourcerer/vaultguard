@@ -1,0 +1,39 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+local.properties
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+
+# IDE
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
+/.idea/appInsightsSettings.xml
+
+# Firebase config — contains the project's API key and OAuth client IDs (finding #43).
+# Keep it on disk; do not track it.
+app/google-services.json
+
+# Signing material — never commit
+*.jks
+*.keystore
+keystore.properties
+
+# Vault backups and any cleartext derived from them.
+# Nothing produced by tools/backup-decrypt may ever be committed.
+*.vaultguard.json
+vaultguard_backup*.json
+vault-export*.json
+*-decrypted.csv
+/tools/out/

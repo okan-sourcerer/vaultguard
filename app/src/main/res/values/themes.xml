@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="splash_background">#656566</color>
+
+    <color name="window_background">#1C1B1F</color>
+
+    <style name="Theme.VaultGuard" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/icon_vault_splash</item>
+    </style>
+</resources>
