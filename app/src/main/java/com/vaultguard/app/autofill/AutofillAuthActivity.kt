@@ -152,7 +152,7 @@ class AutofillAuthActivity : ComponentActivity() {
 
         when (val result = unlockVaultUseCase(password.toCharArray())) {
             UnlockVaultUseCase.Result.Success -> Unit
-            is UnlockVaultUseCase.Result.NeedsOtherPassword -> return result.message
+            is UnlockVaultUseCase.Result.VaultUnreadable -> return result.detail
             UnlockVaultUseCase.Result.WrongPassword -> return "Incorrect master password"
         }
 

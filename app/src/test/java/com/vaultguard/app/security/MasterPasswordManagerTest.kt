@@ -36,12 +36,18 @@ class MasterPasswordManagerTest {
         return manager
     }
 
-    /** Runs a full two-phase change the way ChangeMasterPasswordUseCase does. */
+    /** Changes the password the way ChangeMasterPasswordUseCase does. */
     private suspend fun MasterPasswordManager.changePassword(newPassword: String) {
-        val (key, pending) = prepareChange(newPassword.toCharArray())
-        beginChange(pending)
-        commitChange()
-        adoptProvenKey(key)
+        rewrapForNewPassword(newPassword.toCharArray(), getSessionKey())
+    }
+
+    /** Unlock, for tests: derive, verify, unwrap, adopt. */
+    private suspend fun MasterPasswordManager.unlock(password: String): Boolean {
+        val masterKey = deriveMasterKey(password.toCharArray()) ?: return false
+        if (!verifyMasterKey(masterKey)) return false
+        val vaultKey = unwrapVaultKey(masterKey) ?: return false
+        adoptVaultKey(vaultKey)
+        return true
     }
 
     // -- Setup and unlock ------------------------------------------------------------
@@ -70,7 +76,7 @@ class MasterPasswordManagerTest {
         val manager = setUpVault("correct-password")
         manager.lockVault()
 
-        assertTrue(manager.unlock("correct-password".toCharArray()))
+        assertTrue(manager.unlock("correct-password"))
         assertTrue(manager.isVaultUnlocked)
     }
 
@@ -79,7 +85,7 @@ class MasterPasswordManagerTest {
         val manager = setUpVault("correct-password")
         manager.lockVault()
 
-        assertFalse(manager.unlock("wrong-password".toCharArray()))
+        assertFalse(manager.unlock("wrong-password"))
         assertFalse(manager.isVaultUnlocked)
     }
 
@@ -88,7 +94,7 @@ class MasterPasswordManagerTest {
         val manager = setUpVault("correct-password")
         val sessionKey = manager.getSessionKey()
 
-        assertFalse(manager.unlock("wrong-password".toCharArray()))
+        assertFalse(manager.unlock("wrong-password"))
 
         assertTrue(manager.isVaultUnlocked)
         assertArrayEquals(sessionKey.encoded, manager.getSessionKey().encoded)
@@ -98,7 +104,7 @@ class MasterPasswordManagerTest {
     fun `unlock against an unconfigured vault fails without throwing`() = runTest {
         val manager = manager()
 
-        assertFalse(manager.unlock("anything".toCharArray()))
+        assertFalse(manager.unlock("anything"))
     }
 
     @Test
@@ -135,17 +141,17 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlockWithKey rejects the key derived from the previous master password`() = runTest {
-        // The realistic path into #7: a master-password change leaves the biometric
-        // wrapper holding the old key (finding #6).
+    fun `a key wrapped before a password change still unlocks`() = runTest {
+        // Under the old design this was finding #6: the wrapper held a key derived from
+        // the old password and went stale. The vault key does not change, so it does not.
         val manager = setUpVault("old-password")
-        val oldKey = manager.getSessionKey()
+        val wrappedEarlier = manager.getSessionKey()
 
         manager.changePassword("new-password")
         manager.lockVault()
 
-        assertFalse(manager.unlockWithKey(oldKey))
-        assertFalse(manager.isVaultUnlocked)
+        assertTrue(manager.unlockWithKey(wrappedEarlier))
+        assertTrue(manager.isVaultUnlocked)
     }
 
     @Test
@@ -160,89 +166,92 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `verifyKey does not change session state`() = runTest {
+    fun `verifyVaultKey does not change session state`() = runTest {
         val manager = setUpVault("master-password-1")
         val key = manager.getSessionKey()
         manager.lockVault()
 
-        assertTrue(manager.verifyKey(key))
-        assertFalse("verifyKey must not unlock", manager.isVaultUnlocked)
+        assertTrue(manager.verifyVaultKey(key))
+        assertFalse("verifyVaultKey must not unlock", manager.isVaultUnlocked)
     }
 
     @Test
-    fun `verifyKey returns false when the vault is not set up`() = runTest {
-        assertFalse(manager().verifyKey(SecretKeySpec(ByteArray(32), "AES")))
+    fun `verifyVaultKey returns false when the vault is not set up`() = runTest {
+        assertFalse(manager().verifyVaultKey(SecretKeySpec(ByteArray(32), "AES")))
     }
 
     // -- Changing the master password -------------------------------------------------
 
     @Test
-    fun `a committed change rotates salt and verification`() = runTest {
+    fun `changing the password does not change the vault key`() = runTest {
+        // The whole point of the indirection: rows stay encrypted under the same key, so
+        // nothing has to be rewritten and biometric enrolment stays valid.
         val manager = setUpVault("old-password")
-        val oldSalt = manager.getSalt()
+        val vaultKeyBefore = manager.getSessionKey().encoded.toList()
 
         manager.changePassword("new-password")
 
-        assertFalse(oldSalt.contentEquals(manager.getSalt()))
         manager.lockVault()
-        assertTrue(manager.unlock("new-password".toCharArray()))
-        manager.lockVault()
-        assertFalse(manager.unlock("old-password".toCharArray()))
+        assertTrue(manager.unlock("new-password"))
+        assertEquals(vaultKeyBefore, manager.getSessionKey().encoded.toList())
     }
 
     @Test
-    fun `an aborted change leaves the current password in force`() = runTest {
+    fun `changing the password rotates the salt and verification blob`() = runTest {
         val manager = setUpVault("old-password")
         val saltBefore = manager.getSalt()
 
-        val (_, pending) = manager.prepareChange("new-password".toCharArray())
-        manager.beginChange(pending)
-        manager.abortChange()
+        manager.changePassword("new-password")
 
-        assertNull(manager.pendingChange)
-        assertArrayEquals(saltBefore, manager.getSalt())
+        assertFalse(saltBefore.contentEquals(manager.getSalt()))
         manager.lockVault()
-        assertTrue(manager.unlock("old-password".toCharArray()))
-        manager.lockVault()
-        assertFalse(manager.unlock("new-password".toCharArray()))
+        assertFalse(manager.unlock("old-password"))
+        assertTrue(manager.unlock("new-password"))
     }
 
     @Test
-    fun `beginChange records pending material without disturbing the current password`() = runTest {
-        val manager = setUpVault("old-password")
-        val saltBefore = manager.getSalt()
+    fun `the vault key is not derivable from the salt`() = runTest {
+        // If it were, this would be the old design wearing a new name.
+        val manager = setUpVault("master-password-1")
+        val vaultKey = manager.getSessionKey()
 
-        val (_, pending) = manager.prepareChange("new-password".toCharArray())
-        manager.beginChange(pending)
+        val derived = manager.deriveMasterKey("master-password-1".toCharArray())!!
 
-        assertEquals(pending, manager.pendingChange)
-        assertArrayEquals("current salt must not move until commit", saltBefore, manager.getSalt())
-        manager.lockVault()
-        assertTrue("old password still opens the vault", manager.unlock("old-password".toCharArray()))
+        assertFalse(derived.encoded.contentEquals(vaultKey.encoded))
     }
 
     @Test
-    fun `commitChange promotes pending material and clears it`() = runTest {
-        val manager = setUpVault("old-password")
+    fun `the wrapped vault key only opens with the right master key`() = runTest {
+        val manager = setUpVault("master-password-1")
+        val vaultKey = manager.getSessionKey().encoded.toList()
 
-        val (_, pending) = manager.prepareChange("new-password".toCharArray())
-        manager.beginChange(pending)
-        manager.commitChange()
+        val right = manager.deriveMasterKey("master-password-1".toCharArray())!!
+        val wrong = manager.deriveKey("other-password".toCharArray(), manager.getSalt())
 
-        assertNull(manager.pendingChange)
-        assertArrayEquals(pending.salt, manager.getSalt())
-        manager.lockVault()
-        assertTrue(manager.unlock("new-password".toCharArray()))
+        assertEquals(vaultKey, manager.unwrapVaultKey(right)!!.encoded.toList())
+        assertNull(manager.unwrapVaultKey(wrong))
     }
 
     @Test
-    fun `commitChange with nothing pending is a no-op`() = runTest {
-        val manager = setUpVault("old-password")
-        val saltBefore = manager.getSalt()
+    fun `verifyVaultKey accepts only the current vault key`() = runTest {
+        val manager = setUpVault()
 
-        manager.commitChange()
+        assertTrue(manager.verifyVaultKey(manager.getSessionKey()))
+        assertFalse(manager.verifyVaultKey(manager.generateVaultKey()))
+    }
 
-        assertArrayEquals(saltBefore, manager.getSalt())
+    @Test
+    fun `a legacy vault reports no wrapped vault key`() = runTest {
+        // Vaults created before the indirection have a salt but nothing wrapped.
+        val legacy = manager(mapOf("master_salt" to java.util.Base64.getEncoder().encodeToString(ByteArray(16))))
+
+        assertTrue(legacy.isSetupComplete)
+        assertFalse(legacy.hasWrappedVaultKey)
+    }
+
+    @Test
+    fun `a freshly set up vault has a wrapped vault key`() = runTest {
+        assertTrue(setUpVault().hasWrappedVaultKey)
     }
 
     // -- Database passphrase -----------------------------------------------------------
@@ -279,7 +288,11 @@ class MasterPasswordManagerTest {
         manager.getDatabasePassphrase()
 
         assertEquals(
-            setOf("master_salt", "verification_ciphertext", "verification_iv", "db_passphrase"),
+            setOf(
+                "master_salt", "verification_ciphertext", "verification_iv", "db_passphrase",
+                "vault_key_ciphertext", "vault_key_iv",
+                "vault_key_check_ciphertext", "vault_key_check_iv"
+            ),
             prefs.values.keys
         )
     }
@@ -322,18 +335,25 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `adoptRemoteSetup replaces salt and verification`() = runTest {
+    fun `adoptRemoteSetup replaces the master material but not the vault key`() = runTest {
+        // Sharpens finding #4. Adopting another device's salt and verification blob makes
+        // its master password the one that verifies, but the wrapped vault key still
+        // belongs to this device — so the local vault becomes unreachable through the
+        // master password. The whole flow is reworked in chunk 10; this pins the current
+        // behaviour so that work has something to change.
         val manager = setUpVault("local-password")
         val remote = manager()
         remote.setup("remote-password".toCharArray())
-        val remoteSalt = remote.getSalt()
         val (remoteCiphertext, remoteIv) = remote.getVerificationData()
 
-        manager.adoptRemoteSetup(remoteSalt, remoteCiphertext, remoteIv)
+        manager.adoptRemoteSetup(remote.getSalt(), remoteCiphertext, remoteIv)
         manager.lockVault()
 
-        assertTrue(manager.unlock("remote-password".toCharArray()))
-        manager.lockVault()
-        assertFalse(manager.unlock("local-password".toCharArray()))
+        val remoteMasterKey = manager.deriveMasterKey("remote-password".toCharArray())!!
+        assertTrue("the remote password now verifies", manager.verifyMasterKey(remoteMasterKey))
+        assertNull(
+            "but it cannot unwrap this device's vault key",
+            manager.unwrapVaultKey(remoteMasterKey)
+        )
     }
 }

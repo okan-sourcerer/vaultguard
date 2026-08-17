@@ -221,21 +221,14 @@ class SettingsViewModel @Inject constructor(
                 if (result.succeeded) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        biometricEnabled = if (result.biometricWasDisabled) false
-                        else _uiState.value.biometricEnabled,
-                        message = buildString {
-                            append("Master password changed. ")
-                            append("${result.reEncryptedCount} entries re-encrypted.")
-                            if (result.biometricWasDisabled) {
-                                append(
-                                    " Biometric unlock was turned off because it still held " +
-                                        "the old key — re-enable it below."
-                                )
-                            }
-                        }
+                        message = "Master password changed. Your entries were not re-encrypted " +
+                            "and biometric unlock still works."
                     )
                 } else {
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = "Current password is incorrect")
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = result.failureReason ?: "Could not change the master password"
+                    )
                 }
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, error = "Failed: ${e.message}")

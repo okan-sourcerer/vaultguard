@@ -19,6 +19,21 @@ class ExportVaultUseCase @Inject constructor(
     private val keyDerivation: KeyDerivation
 ) {
     suspend operator fun invoke(uri: Uri) {
+        // Format v1 sealed the envelope with a key the importer re-derived from the
+        // recorded salt. Since the vault-key indirection landed, the session key is the
+        // random vault key and is not derivable from the salt at all, so a v1 file written
+        // now could never be restored — including by this app.
+        //
+        // Failing loudly beats writing a backup that looks fine and is not. Backup v2
+        // (chunk 7) replaces this; until then the unencrypted CSV export is the working
+        // path. See docs/DATA-FORMATS.md and finding #3.
+        error(
+            "Encrypted export is temporarily unavailable while the backup format is being " +
+                "replaced. Use \"Export Unencrypted CSV\" under Migration, and store the " +
+                "file somewhere encrypted."
+        )
+
+        @Suppress("UNREACHABLE_CODE")
         val key = masterPasswordManager.getSessionKey()
         val salt = masterPasswordManager.getSalt()
 

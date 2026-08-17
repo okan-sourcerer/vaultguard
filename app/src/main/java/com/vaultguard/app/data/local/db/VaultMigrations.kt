@@ -32,5 +32,28 @@ object VaultMigrations {
         }
     }
 
-    val ALL = arrayOf(MIGRATION_1_2)
+    /**
+     * Re-backfills `passwordChangedAt` from `createdAt`, correcting MIGRATION_1_2.
+     *
+     * That migration copied `updatedAt`, on the reasoning that it was an upper bound on
+     * when the password changed. It was — until the master-password re-encryption sweep
+     * rewrote `updatedAt` on every row. Any vault whose password had been changed since
+     * the entries were created therefore migrated with every entry reporting an age of
+     * "since the last password change", which for this install was a few days.
+     *
+     * `createdAt` is untouched by the sweep and is a *lower* bound: correct for any entry
+     * whose password was never rotated, and too old for the rest. That is the better
+     * direction to be wrong in for a feature whose whole purpose is to prompt rotation —
+     * over-warning nags, under-warning silently hides stale passwords.
+     *
+     * Safe to apply unconditionally: genuine per-entry rotation timestamps only start
+     * being recorded from v2 onwards, and none can predate this migration.
+     */
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("UPDATE credentials SET passwordChangedAt = createdAt")
+        }
+    }
+
+    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

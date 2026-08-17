@@ -129,4 +129,39 @@ class VaultMigrationTest {
             assertEquals(0, cursor.getInt(0))
         }
     }
+
+    @Test
+    fun migrate2To3_rebackfillsPasswordAgeFromCreatedAt() {
+        // MIGRATION_1_2 sourced passwordChangedAt from updatedAt, which the master-password
+        // re-encryption sweep had already rewritten on every row. createdAt survives that
+        // sweep, so it is the better estimate.
+        helper.createDatabase(TEST_DB, 1).use { db ->
+            insertV1Row(db, "a", createdAt = 1_000, updatedAt = 9_999)
+            insertV1Row(db, "b", createdAt = 2_000, updatedAt = 9_999)
+        }
+
+        helper.runMigrationsAndValidate(TEST_DB, 2, true, VaultMigrations.MIGRATION_1_2).close()
+        val db = helper.runMigrationsAndValidate(TEST_DB, 3, true, VaultMigrations.MIGRATION_2_3)
+
+        db.query("SELECT id, createdAt, passwordChangedAt FROM credentials ORDER BY id").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1_000L, cursor.getLong(2))
+            assertTrue(cursor.moveToNext())
+            assertEquals(2_000L, cursor.getLong(2))
+        }
+    }
+
+    @Test
+    fun migrateAll_fromV1_landsOnCreatedAt() {
+        helper.createDatabase(TEST_DB, 1).use { db ->
+            insertV1Row(db, "a", createdAt = 1_000, updatedAt = 9_999)
+        }
+
+        val db = helper.runMigrationsAndValidate(TEST_DB, 3, true, *VaultMigrations.ALL)
+
+        db.query("SELECT passwordChangedAt FROM credentials").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(1_000L, cursor.getLong(0))
+        }
+    }
 }

@@ -12,7 +12,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | 1 | DI deletes the entire vault on any DB-open failure | `di/DatabaseModule.kt:35-50` | **fixed** (chunk 2) |
 | 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | **fixed** (chunk 2) |
 | 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | open |
-| 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open |
+| 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open — sharpened by the vault-key change, see below |
 | 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | **fixed** (chunk 5) |
 | 6 | Password change leaves biometric wrapping the old key | `usecase/ChangeMasterPasswordUseCase.kt` | **fixed** (chunk 4) |
 | 7 | `unlockWithKey` never validates the key | `security/MasterPasswordManager.kt:96-98` | **fixed** (chunk 3) |
@@ -35,6 +35,11 @@ re-encrypting. Only round-trips on the same device with an unchanged master pass
 
 **#4** — `fullSync()` runs *before* `lockVault()`, pushing rows encrypted under the old
 local key into the shared remote vault, and the adopted salt orphans every local row.
+
+Since the vault-key indirection this is sharper, not milder: `adoptRemoteSetup` replaces
+the salt and verification blob but **not** the wrapped vault key, so after adopting, the
+remote master password verifies while unwrapping the local vault key fails. A test pins
+that behaviour so chunk 10 has something concrete to change.
 
 **#5** — salt and verification are switched before the re-encryption loop, which has no
 transaction. A failure mid-sweep splits the vault across two keys.

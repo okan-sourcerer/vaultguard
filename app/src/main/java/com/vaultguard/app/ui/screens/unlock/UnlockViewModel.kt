@@ -59,12 +59,12 @@ class UnlockViewModel @Inject constructor(
                 UnlockVaultUseCase.Result.Success ->
                     _uiState.value = _uiState.value.copy(isLoading = false, isUnlocked = true)
 
-                // The password is right but belongs to the other side of an interrupted
-                // change, so this is not a failed attempt and must not count toward lockout.
-                is UnlockVaultUseCase.Result.NeedsOtherPassword ->
+                // The password was right; the vault itself is the problem. Not a failed
+                // attempt, so it must not count toward lockout.
+                is UnlockVaultUseCase.Result.VaultUnreadable ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = result.message,
+                        error = result.detail,
                         password = ""
                     )
 
@@ -95,17 +95,17 @@ class UnlockViewModel @Inject constructor(
                         "Enter your master password instead."
                 )
 
-                // The unwrapped key does not open the vault. The realistic cause is a
-                // master password change, which leaves the wrapped copy stale
-                // (finding #6). Accepting it would unlock into an empty-looking vault,
-                // which is what finding #7 allowed.
+                // The unwrapped key is not the current vault key. Since the vault key
+                // survives a master-password change, the remaining causes are an enrolment
+                // predating the vault-key layout, or a vault replaced from another device.
+                // Accepting it regardless would unlock into an empty-looking vault, which
+                // is what finding #7 allowed.
                 !masterPasswordManager.unlockWithKey(vaultKey) -> {
                     biometricAuthManager.disableBiometric()
                     _uiState.value = _uiState.value.copy(
                         biometricAvailable = false,
-                        error = "Biometric unlock is out of date — most likely your master " +
-                            "password changed. It has been turned off. Unlock with your " +
-                            "master password, then re-enable it in Settings."
+                        error = "Biometric unlock is out of date and has been turned off. " +
+                            "Unlock with your master password, then re-enable it in Settings."
                     )
                 }
 

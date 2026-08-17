@@ -7,7 +7,7 @@ import com.vaultguard.app.data.local.db.entity.CredentialEntity
 
 @Database(
     entities = [CredentialEntity::class],
-    version = 2,
+    version = 3,
     // Schemas are committed under app/schemas so migrations can be tested against the
     // real historical shape rather than a reconstruction.
     exportSchema = true
