@@ -16,6 +16,7 @@ import androidx.core.content.edit
 interface SecurePrefs {
     fun getString(key: String): String?
     fun putAll(values: Map<String, String>)
+    fun remove(keys: Collection<String>)
 }
 
 /**
@@ -49,5 +50,9 @@ class EncryptedSharedPrefs(
 
     override fun putAll(values: Map<String, String>) {
         prefs.edit { values.forEach { (key, value) -> putString(key, value) } }
+    }
+
+    override fun remove(keys: Collection<String>) {
+        prefs.edit { keys.forEach { remove(it) } }
     }
 }

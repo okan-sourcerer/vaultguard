@@ -16,4 +16,9 @@ class FakeSecurePrefs(
         writeCount++
         this.values.putAll(values)
     }
+
+    override fun remove(keys: Collection<String>) {
+        writeCount++
+        keys.forEach { values.remove(it) }
+    }
 }

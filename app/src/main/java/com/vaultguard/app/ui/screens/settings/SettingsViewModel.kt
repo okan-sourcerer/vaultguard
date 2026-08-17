@@ -213,12 +213,26 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val success = changeMasterPasswordUseCase(
+                val result = changeMasterPasswordUseCase(
                     currentPassword.toCharArray(),
                     newPassword.toCharArray()
                 )
-                if (success) {
-                    _uiState.value = _uiState.value.copy(isLoading = false, message = "Master password changed")
+                if (result.succeeded) {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        biometricEnabled = if (result.biometricWasDisabled) false
+                        else _uiState.value.biometricEnabled,
+                        message = buildString {
+                            append("Master password changed. ")
+                            append("${result.reEncryptedCount} entries re-encrypted.")
+                            if (result.biometricWasDisabled) {
+                                append(
+                                    " Biometric unlock was turned off because it still held " +
+                                        "the old key — re-enable it below."
+                                )
+                            }
+                        }
+                    )
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false, error = "Current password is incorrect")
                 }
@@ -266,6 +280,13 @@ class SettingsViewModel @Inject constructor(
                         }
                         syncService.fullSync()
                     } catch (_: Exception) { }
+
+                    if (adoptedRemoteVault) {
+                        // Adopting a different salt makes the biometric wrapper stale for
+                        // the same reason a password change does (finding #6) — it holds a
+                        // key derived from the old salt, which no longer opens this vault.
+                        biometricAuthManager.disableBiometric()
+                    }
 
                     refreshState()
                     if (adoptedRemoteVault) {

@@ -2,7 +2,9 @@ package com.vaultguard.app.di
 
 import android.content.Context
 import com.vaultguard.app.security.BiometricAuthManager
+import com.vaultguard.app.security.BiometricKeystore
 import com.vaultguard.app.security.EncryptedSharedPrefs
+import com.vaultguard.app.security.KeystoreManager
 import com.vaultguard.app.security.MasterPasswordManager
 import com.vaultguard.app.security.SecurePrefs
 import dagger.Module
@@ -22,6 +24,11 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object SecurityModule {
+
+    @Provides
+    @Singleton
+    fun provideBiometricKeystore(keystoreManager: KeystoreManager): BiometricKeystore =
+        keystoreManager
 
     @Provides
     @Singleton
