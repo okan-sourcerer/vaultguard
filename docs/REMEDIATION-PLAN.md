@@ -403,12 +403,54 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 12 — Build + hygiene | #41–#46 | **done** — release build verified |
 | 13 — Breach check honesty | #14 | **done** — 15 tests |
 | 13a — Clipboard actually clears | #36 regression | **done** — foreground service; the first two attempts never fired |
-| 14 — Usability pass | #50, #51, #53 and whatever it turns up | not started |
+| 14 — Autofill completeness | #50, #51, #53, #54, #55 | **code done** — 10 tests; not yet exercised on the device |
+| 15 — Usability pass | #56 and whatever it turns up | not started |
+
+---
+
+## Chunk 14 — Autofill completeness
+
+**Findings:** #50, #51, #53, #54, #55.
+
+The three findings held back for the usability pass, plus two the pass had not reached yet:
+#54 and #55 came out of asking what happens on a login screen that shows a password field
+and no username — the two-step flow Google, Microsoft and most banks use.
+
+**Changes:**
+- `SaveValueMerge` merges the values from *every* fill context of a session, last-non-blank
+  wins, so a username typed on the first screen survives to the save prompt (#54). Pure
+  Kotlin, 10 tests.
+- `SaveInfo.FLAG_DELAY_SAVE` on a screen holding a username and no password, so the
+  platform stops committing that half of a two-step login on its own (#54). Save data types
+  now describe the screen instead of always claiming both.
+- The duplicate rule reads the merged username, and treats a password-only re-auth screen
+  as belonging to an account already held rather than a new blank-username entry (#55).
+- `onFillRequest` registers a cancellation listener before doing anything, cancels the
+  decryption job, and stays silent afterwards (#51).
+- `AutofillSettingsActivity`, a trampoline the system Settings gear can name, sends the app
+  to Settings rather than dropping the user on the unlock screen (#53). The system builds
+  that intent itself, so there is no way to carry an extra without one.
+- `InlineSuggestions` builds the keyboard-strip chips, used by the service *and* the auth
+  activity, so a credential unlocked from the strip comes back to the strip (#50).
+  Android 11 and up; below that the menu presentation carries the response as before.
+
+**Not device-verified.** Everything here is decided by the platform or by another process:
+whether the keyboard renders the Slice, whether `FLAG_DELAY_SAVE` behaves as documented on
+this device, whether the Settings gear reaches the trampoline. This is the exact category
+CLAUDE.md says to disbelieve until it is seen running.
+
+**Deliberately not fixed:** #56, a rotated password never being offered for saving. It
+needs an update-existing path in `AutofillSaveActivity`, which is a UX change rather than a
+correction.
+
+---
 
 ## Picking this up again
 
-Every chunk through 13a is done and verified on the device. The next piece of work is the
-usability pass, and it is worth doing before the three findings held for it, because it
+Every chunk through 13a is done and verified on the device. Chunk 14 is written and builds
+but has been exercised only by tests.
+
+The next piece of work is the usability pass, and it is worth doing before #56, because it
 will probably find more.
 
 Chunks 8a and 13a are the argument for that ordering. Both exist because the owner used

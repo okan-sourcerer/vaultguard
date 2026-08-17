@@ -19,7 +19,7 @@
     release; the attribute is required and has no "any version" value.
 -->
 <autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:settingsActivity="com.vaultguard.app.MainActivity">
+    android:settingsActivity="com.vaultguard.app.autofill.AutofillSettingsActivity">
 
     <compatibility-package
         android:name="com.android.chrome"

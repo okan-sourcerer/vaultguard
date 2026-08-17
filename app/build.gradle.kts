@@ -112,6 +112,9 @@ dependencies {
     // Biometric
     implementation(libs.biometric)
 
+    // Autofill (inline suggestions)
+    implementation(libs.androidx.autofill)
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)

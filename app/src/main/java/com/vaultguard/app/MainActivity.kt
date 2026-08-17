@@ -13,6 +13,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
 import com.vaultguard.app.data.local.db.VaultDatabaseStatusHolder
@@ -26,6 +29,15 @@ import androidx.core.graphics.toColorInt
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    companion object {
+        /**
+         * Set by [com.vaultguard.app.autofill.AutofillSettingsActivity] so the app opens on
+         * Settings rather than the vault list (finding #53). Honoured once, after any
+         * unlock the user still has to pass.
+         */
+        const val EXTRA_OPEN_SETTINGS = "com.vaultguard.app.extra.OPEN_SETTINGS"
+    }
 
     @Inject
     lateinit var masterPasswordManager: MasterPasswordManager
@@ -84,9 +96,17 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
+                    // Consumed on first use so a later auto-lock and unlock returns to the
+                    // vault, not back into Settings.
+                    var openSettings by rememberSaveable {
+                        mutableStateOf(intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false))
+                    }
+
                     NavGraph(
                         navController = navController,
-                        startDestination = startDestination
+                        startDestination = startDestination,
+                        openSettingsOnVaultEntry = openSettings,
+                        onOpenSettingsHandled = { openSettings = false }
                     )
                 }
             }

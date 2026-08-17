@@ -1,6 +1,7 @@
 package com.vaultguard.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -41,10 +42,18 @@ sealed class Screen(val route: String) {
     data object Recovery : Screen("recovery")
 }
 
+/**
+ * @param openSettingsOnVaultEntry pushes Settings the first time the vault list is reached,
+ *   for the autofill settings entry point (#53). Hooking it to the vault rather than to a
+ *   start destination means it works whether the app opened unlocked or had to go through
+ *   the unlock screen first, and it leaves the vault beneath Settings so Back behaves.
+ */
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    startDestination: String
+    startDestination: String,
+    openSettingsOnVaultEntry: Boolean = false,
+    onOpenSettingsHandled: () -> Unit = {}
 ) {
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Screen.Recovery.route) {
@@ -72,6 +81,13 @@ fun NavGraph(
         }
 
         composable(Screen.Vault.route) {
+            LaunchedEffect(Unit) {
+                if (openSettingsOnVaultEntry) {
+                    onOpenSettingsHandled()
+                    navController.navigate(Screen.Settings.route)
+                }
+            }
+
             VaultScreen(
                 onCredentialClick = { id ->
                     navController.navigate(Screen.Detail.createRoute(id))

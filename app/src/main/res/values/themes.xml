@@ -10,4 +10,16 @@
         <item name="android:windowSplashScreenBackground">@color/splash_background</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/icon_vault_splash</item>
     </style>
+
+    <!--
+        For AutofillSettingsActivity, which forwards to MainActivity and finishes in
+        onCreate. Transparent rather than Theme.NoDisplay: NoDisplay is unreliable on
+        current Android and shows as a flash of the window background otherwise.
+    -->
+    <style name="Theme.VaultGuard.Invisible" parent="Theme.VaultGuard">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

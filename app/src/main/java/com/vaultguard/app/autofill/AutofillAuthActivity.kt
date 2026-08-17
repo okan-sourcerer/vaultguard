@@ -1,13 +1,16 @@
 package com.vaultguard.app.autofill
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.service.autofill.Dataset
 import android.service.autofill.FillResponse
+import android.service.autofill.InlinePresentation
 import android.view.WindowManager
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillManager
 import android.view.autofill.AutofillValue
+import android.view.inputmethod.InlineSuggestionsRequest
 import android.widget.RemoteViews
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -69,12 +72,20 @@ class AutofillAuthActivity : ComponentActivity() {
         const val EXTRA_PACKAGE_NAME = "app_package"
         const val EXTRA_USERNAME_IDS = "username_ids"
         const val EXTRA_PASSWORD_IDS = "password_ids"
+
+        /** The keyboard's inline specs, forwarded by the service (#50). API 30+ only. */
+        const val EXTRA_INLINE_REQUEST = "inline_request"
     }
+
+    /** Distinct per attribution PendingIntent, for the same reason as finding #52. */
+    private val requestCodes = java.util.concurrent.atomic.AtomicInteger(0)
 
     @Inject lateinit var masterPasswordManager: MasterPasswordManager
     @Inject lateinit var cryptoManager: CryptoManager
     @Inject lateinit var credentialDao: CredentialDao
     @Inject lateinit var unlockVaultUseCase: UnlockVaultUseCase
+
+    private var inlineSpecs: InlineSuggestions.Specs = InlineSuggestions.Specs.NONE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +98,14 @@ class AutofillAuthActivity : ComponentActivity() {
         val appPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME)
         val usernameIds = intent.getParcelableArrayListExtra<AutofillId>(EXTRA_USERNAME_IDS) ?: emptyList()
         val passwordIds = intent.getParcelableArrayListExtra<AutofillId>(EXTRA_PASSWORD_IDS) ?: emptyList()
+
+        inlineSpecs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            InlineSuggestions.Specs.from(
+                intent.getParcelableExtra<InlineSuggestionsRequest>(EXTRA_INLINE_REQUEST)
+            )
+        } else {
+            InlineSuggestions.Specs.NONE
+        }
 
         setContent {
             VaultGuardTheme {
@@ -187,21 +206,30 @@ class AutofillAuthActivity : ComponentActivity() {
 
         val responseBuilder = FillResponse.Builder()
         var added = 0
-        for (credential in credentials) {
+        for ((index, credential) in credentials.withIndex()) {
             val presentation = RemoteViews(packageName, R.layout.autofill_item).apply {
                 setTextViewText(
                     R.id.autofill_text,
                     "${credential.displayName} — ${credential.username}"
                 )
             }
+            // The user reached this screen by tapping a chip in the keyboard strip, so the
+            // results belong back in the strip and not only in the drop-down menu (#50).
+            val inlinePresentation = InlineSuggestions.build(
+                this,
+                inlineSpecs.at(index),
+                credential.displayName,
+                credential.username,
+                requestCodes.incrementAndGet()
+            )
             val dataset = Dataset.Builder(presentation)
             var hasValue = false
             for (id in usernameIds) {
-                dataset.setValue(id, AutofillValue.forText(credential.username))
+                setValue(dataset, id, credential.username, presentation, inlinePresentation)
                 hasValue = true
             }
             for (id in passwordIds) {
-                dataset.setValue(id, AutofillValue.forText(credential.password))
+                setValue(dataset, id, credential.password, presentation, inlinePresentation)
                 hasValue = true
             }
             if (hasValue) {
@@ -221,6 +249,27 @@ class AutofillAuthActivity : ComponentActivity() {
         )
         finish()
         return null
+    }
+
+    /**
+     * Mirrors `VaultAutofillService.setDatasetValue`. The inline-carrying overload is
+     * deprecated in favour of the API 33 `Presentations` builder; minSdk is 28, and this
+     * one works on everything from 30 up. Revisit when minSdk reaches 33.
+     */
+    @Suppress("DEPRECATION")
+    private fun setValue(
+        builder: Dataset.Builder,
+        id: AutofillId,
+        text: String,
+        presentation: RemoteViews,
+        inlinePresentation: InlinePresentation?
+    ) {
+        val value = AutofillValue.forText(text)
+        if (inlinePresentation != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setValue(id, value, presentation, inlinePresentation)
+        } else {
+            builder.setValue(id, value)
+        }
     }
 
     /** Goes through the shared matcher — the same rules the unlocked path uses. */

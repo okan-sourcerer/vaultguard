@@ -61,6 +61,17 @@
             android:name=".autofill.AutofillSaveActivity"
             android:exported="false"
             android:theme="@style/Theme.VaultGuard" />
+
+        <!--
+            Exported because the system Settings app launches it, by name, from the gear
+            beside VaultGuard in the autofill service list (#53). It holds no data and
+            forwards straight to MainActivity, which still gates on the master password.
+        -->
+        <activity
+            android:name=".autofill.AutofillSettingsActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.VaultGuard.Invisible" />
     </application>
 
 </manifest>

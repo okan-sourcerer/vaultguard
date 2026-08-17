@@ -1,6 +1,6 @@
 # Known defects
 
-Catalogue from the full-project review of 2026-08-17, plus #47–#53 found later by using
+Catalogue from the full-project review of 2026-08-17, plus #47–#56 found later by using
 the app rather than reading it. Numbering is stable — the remediation plan and commit
 messages reference these IDs. Update **Status** as fixes land.
 
@@ -15,7 +15,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | P2 — sync (#19–#24) | all fixed, #22 obsolete |
 | P3 — business logic and UX (#25–#40) | all fixed |
 | P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
-| P1b — autofill usability (#47–#53) | #47, #48, #49, #52 fixed |
+| P1b — autofill usability (#47–#56) | all fixed except #56 |
 
 **Still open**, all deliberate rather than forgotten:
 
@@ -23,12 +23,14 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | --- | --- | --- |
 | 4 (part) | Joining an account that already holds a different vault | The data-loss halves are fixed and a mismatch now refuses rather than merging. Designing the join flow needs a second device |
 | 45 (part) | `GoogleSignIn` → Credential Manager | A different auth flow with its own failure modes. Deserves its own change, not a line in a hygiene pass |
-| 50 | Inline autofill suggestions | Needs a device to judge; held for the usability pass |
-| 51 | `cancellationSignal` ignored in `onFillRequest` | Same |
-| 53 | `settingsActivity` points at `MainActivity` | Same |
+| 56 | A rotated password is never offered for saving | Needs an update-existing flow in the save activity rather than the create-only one there now. Found while fixing #55 |
 
 Verified on the owner's device against both the debug and the minified release build:
 vault loads, biometric unlock, autofill in a third-party app, and clipboard clearing.
+
+**Chunk 14 is not yet device-verified.** #50 in particular cannot be believed until it is
+seen: the chip is drawn by the keyboard, in another process, from a Slice this app builds,
+and R8 inlines most of the library that builds it.
 
 ## P0 — Vault destruction / silent data loss
 
@@ -150,10 +152,13 @@ correct and one worth switching on.
 | 47 | Save dialog launched with `startActivity` from a service; blocked on Android 10+ | `autofill/VaultAutofillService.kt` | **fixed** (chunk 8a) |
 | 48 | No `<compatibility-package>` entries, so browsers fill unreliably or not at all | `res/xml/autofill_service_config.xml` | **fixed** (chunk 8a) |
 | 49 | Dismissal key collapses to the browser package, silencing every site at once | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8a) |
-| 50 | No inline suggestions, so results never reach the keyboard strip | `autofill/VaultAutofillService.kt` | open |
-| 51 | `cancellationSignal` ignored; responses delivered after cancellation | `autofill/VaultAutofillService.kt:43` | open |
+| 50 | No inline suggestions, so results never reach the keyboard strip | `autofill/VaultAutofillService.kt` | **fixed** (chunk 14) |
+| 51 | `cancellationSignal` ignored; responses delivered after cancellation | `autofill/VaultAutofillService.kt:43` | **fixed** (chunk 14) |
 | 52 | Shared `PendingIntent` request code cancelled concurrent auth intents | `autofill/VaultAutofillService.kt` | **fixed** (chunk 8a) |
-| 53 | `settingsActivity` points at `MainActivity`, landing on the unlock screen | `res/xml/autofill_service_config.xml` | open |
+| 53 | `settingsActivity` points at `MainActivity`, landing on the unlock screen | `res/xml/autofill_service_config.xml` | **fixed** (chunk 14) |
+| 54 | Only the last fill context is read, so a two-step login saves a blank username | `autofill/VaultAutofillService.kt:131` | **fixed** (chunk 14) |
+| 55 | Duplicate check compares the blank username, so #54 also creates a duplicate | `autofill/VaultAutofillService.kt:164-166` | **fixed** (chunk 14) |
+| 56 | A password changed on the site is treated as a duplicate and never saved | `autofill/VaultAutofillService.kt`, `autofill/AutofillSaveActivity.kt` | open |
 
 **#47** — `SaveCallback.onSuccess(IntentSender)` exists precisely so the *system* launches
 the dialog. Calling `startActivity` from a backgrounded service is blocked on Android 10
@@ -167,6 +172,28 @@ That missing domain is also what triggered #49.
 **#49** — the key was `webDomain ?: packageName`, so in a browser it became the browser's
 own package. Tapping Skip once on a single website silenced the save prompt for everything
 browsed thereafter. #34 added expiry to this without addressing the key.
+
+**#54** — two-step logins, where the username is on one screen and the password on the
+next, are the norm rather than the exception: Google, Microsoft, Amazon and most banks work
+this way. Android accumulates the whole session and hands `onSaveRequest` *every* fill
+context; `onFillRequest` likewise receives each one collected so far. Both read only
+`fillContexts.lastOrNull()`, which on a two-step login is the password screen alone. The
+username typed on the first screen is discarded, and the credential is offered for saving
+with an empty username. `SaveInfo.FLAG_DELAY_SAVE` (API 28, and minSdk is 28) exists for
+exactly this shape of flow.
+
+**#55** — the consequence. `findMatchingCredentials(...).any { it.username == username }`
+compares against the empty string #54 produced, so it never matches the entry the user
+already has. Instead of staying quiet about a known credential, the service prompts, and
+accepting leaves a blank-username duplicate beside the good one. The two are one fix.
+
+**#56** — the duplicate rule matches on username alone, so rotating a password on a website
+looks identical to signing in again: the service sees a credential it already holds and
+says nothing. The vault keeps the old password indefinitely, with nothing to indicate it is
+now wrong, and the next autofill types a password the site will reject. Fixing it means
+`AutofillSaveActivity` gaining an update path — "update the saved password for this
+account?" — rather than the create-only flow it has, which is why it is not folded into
+#55.
 
 
 ## P2 — Sync correctness
