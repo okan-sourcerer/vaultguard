@@ -30,6 +30,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            // Signed with the debug key so a minified build can actually be installed and
+            // exercised. R8 breakage — a missing keep rule for a reflectively-loaded class,
+            // say — cannot be found any other way: it never reproduces in a debug build,
+            // and an unsigned APK cannot be installed to try.
+            //
+            // BEFORE DISTRIBUTING ANYTHING: replace this with a real keystore. A
+            // debug-signed release is fine on your own device and nowhere else.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

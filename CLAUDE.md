@@ -65,8 +65,14 @@ vault — do not update the expected value to make it pass.
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
-Release builds are minified and the ProGuard rules are currently wrong (#41) — a release
-build is not known to work. Verify before relying on one.
+```bash
+./gradlew :app:assembleRelease
+```
+
+The release build is minified and debug-signed for local testing. Anything reached only
+by reflection or JNI needs a keep rule in `app/proguard-rules.pro`, and a missing one
+cannot fail in a debug build — check `build/outputs/mapping/release/usage.txt` after
+adding code that is loaded by name.
 
 ## Testing notes
 

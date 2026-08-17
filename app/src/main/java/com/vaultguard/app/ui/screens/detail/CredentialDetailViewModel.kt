@@ -8,6 +8,7 @@ import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.security.BreachCheckService
 import com.vaultguard.app.security.BreachResult
+import com.vaultguard.app.security.SecureClipboard
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +32,8 @@ data class DetailUiState(
 class CredentialDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val credentialRepository: CredentialRepository,
-    private val breachCheckService: BreachCheckService
+    private val breachCheckService: BreachCheckService,
+    private val clipboard: SecureClipboard
 ) : ViewModel() {
 
     private val credentialId: String = checkNotNull(savedStateHandle["id"])
@@ -83,6 +85,14 @@ class CredentialDetailViewModel @Inject constructor(
             val result = breachCheckService.check(password)
             _uiState.value = _uiState.value.copy(isCheckingBreach = false, breachResult = result)
         }
+    }
+
+    /**
+     * SecureClipboard is a @Singleton; the screen used to build its own with
+     * `remember { SecureClipboard(context) }`, quietly bypassing Hilt (finding #46).
+     */
+    fun onCopy(label: String, value: String) {
+        if (value.isNotEmpty()) clipboard.copyWithAutoExpiry(label, value)
     }
 
     fun onDelete() {

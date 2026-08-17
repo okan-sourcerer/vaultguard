@@ -36,13 +36,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import com.vaultguard.app.security.SecureClipboard
 import com.vaultguard.app.ui.components.ConfirmDialog
 import com.vaultguard.app.ui.components.PasswordField
 import java.text.SimpleDateFormat
@@ -59,8 +57,6 @@ fun CredentialDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val clipboard = remember { SecureClipboard(context) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
@@ -169,12 +165,12 @@ fun CredentialDetailScreen(
 
                 if (credential.url.isNotEmpty()) {
                     DetailField("URL", credential.url) {
-                        clipboard.copyWithAutoExpiry("URL", credential.url)
+                        viewModel.onCopy("URL", credential.url)
                     }
                 }
 
                 DetailField("Username", credential.username) {
-                    clipboard.copyWithAutoExpiry("Username", credential.username)
+                    viewModel.onCopy("Username", credential.username)
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -184,7 +180,7 @@ fun CredentialDetailScreen(
                     onValueChange = {},
                     label = "Password",
                     readOnly = true,
-                    onCopy = { clipboard.copyWithAutoExpiry("Password", credential.password) }
+                    onCopy = { viewModel.onCopy("Password", credential.password) }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

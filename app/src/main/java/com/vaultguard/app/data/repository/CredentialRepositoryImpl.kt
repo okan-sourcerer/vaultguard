@@ -99,28 +99,6 @@ class CredentialRepositoryImpl @Inject constructor(
         credentialDao.softDelete(id)
     }
 
-    override suspend fun search(query: String): VaultSnapshot<CredentialSummary> {
-        val snapshot = decryptAll(credentialDao.getAll().filter { !it.isDeleted })
-        val lowerQuery = query.lowercase()
-
-        val matches = snapshot.items.filter { credential ->
-            credential.siteName.lowercase().contains(lowerQuery) ||
-                credential.appName.lowercase().contains(lowerQuery) ||
-                credential.username.lowercase().contains(lowerQuery) ||
-                credential.category.lowercase().contains(lowerQuery) ||
-                credential.tags.any { it.lowercase().contains(lowerQuery) }
-        }
-
-        // Undecryptable rows are carried through unfiltered: a row that cannot be read
-        // cannot be excluded by a search term either, and hiding it here would recreate
-        // the original bug in a narrower form.
-        return VaultSnapshot(
-            items = matches.map { it.toSummary() },
-            undecryptableIds = snapshot.undecryptableIds,
-            isLocked = snapshot.isLocked
-        )
-    }
-
     /**
      * Decrypts a batch, keeping the failures rather than discarding them.
      *

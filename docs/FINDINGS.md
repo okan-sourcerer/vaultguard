@@ -192,17 +192,36 @@ re-encryption sweep. Pinning an entry resets its displayed "password age" to *To
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
-| 41 | ProGuard keeps reference packages the app does not use | `app/proguard-rules.pro` | open |
-| 42 | `default_web_client_id` hand-declared *and* plugin-generated | `res/values/strings.xml:3` | open (verified: not a build breaker) |
-| 43 | `google-services.json` not gitignored | `.gitignore` | open |
-| 44 | No real tests — only the two IDE templates | `app/src/test`, `app/src/androidTest` | open |
-| 45 | Deprecated `GoogleSignIn` API; `biometric` on an alpha version | `GoogleAuthManager.kt`, `libs.versions.toml:22` | open |
-| 46 | Assorted hygiene (see below) | various | open |
+| 41 | ProGuard keeps reference packages the app does not use | `app/proguard-rules.pro` | **fixed** (chunk 12) |
+| 42 | `default_web_client_id` hand-declared *and* plugin-generated | `res/values/strings.xml:3` | **fixed** (chunk 12) |
+| 43 | `google-services.json` not gitignored | `.gitignore` | **fixed** (chunk 0) |
+| 44 | No real tests — only the two IDE templates | `app/src/test`, `app/src/androidTest` | **fixed** (chunks 1–12) |
+| 45 | Deprecated `GoogleSignIn` API; `biometric` on an alpha version | `GoogleAuthManager.kt`, `libs.versions.toml:22` | **partly** (chunk 12) |
+| 46 | Assorted hygiene (see below) | various | **fixed** (chunk 12) |
 
-**#41** — `-keep class net.sqlcipher.**` but the app uses `net.zetetic.database.sqlcipher`;
-`-keep class org.signal.argon2.**` but the app uses BouncyCastle's `Argon2BytesGenerator`,
-which has no keep rule at all. With minification enabled this is a likely release-only
-crash that never appears in debug builds.
+**#41** — `-keep class net.sqlcipher.**` matched nothing: that is the package of the
+*older* SQLCipher artifact, while this app uses `net.zetetic.database`, whose classes are
+resolved by name from native code. `-keep class org.signal.argon2.**` referenced a library
+never present; BouncyCastle's Argon2 is constructed directly and needs no rule.
+
+Fixing it turned up a keep rule that was missing rather than wrong: **WorkManager
+instantiates workers reflectively from a stored class name**, and nothing refers to
+`ClearClipboardWorker` by type, so R8 was free to remove it — the clipboard would simply
+never have been cleared in a release build. Verified against `usage.txt` and `mapping.txt`
+from a real minified build, which now also installs, since release is debug-signed for
+local testing.
+
+**#42** — the plugin generates `default_web_client_id` from `google-services.json`, and
+`strings.xml` declared it too. It worked only because both copies held the same value:
+`app/src/main/res` overrides generated resources, so the hand-written one silently won.
+Swapping in a different Firebase project would have kept the stale value and broken
+sign-in with an error pointing nowhere near the cause. The hand-written entry is gone.
+
+**#45** — `biometric` moved from `1.2.0-alpha05` to stable `1.1.0`; every API the app uses
+exists there, and an alpha is a poor dependency for an authentication path. The
+`GoogleSignIn` migration to Credential Manager is **not** done: it is a different auth
+flow with its own dependency and failure modes, and it is working. Worth doing, but as its
+own piece of work rather than folded into a hygiene pass.
 
 **#42** — verified 2026-08-17 by building and inspecting the merged resources. The string
 is declared in **both** `res/values/strings.xml` and the plugin-generated

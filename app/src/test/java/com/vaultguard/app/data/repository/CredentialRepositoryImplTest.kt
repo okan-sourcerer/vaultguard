@@ -193,36 +193,6 @@ class CredentialRepositoryImplTest {
         assertEquals(source.tags, restored.tags)
     }
 
-    // -- Search ---------------------------------------------------------------------------
-
-    @Test
-    fun `search matches on site name and username`() = runTest {
-        coEvery { dao.getAll() } returns listOf(
-            entity("a", credential("a", siteName = "GitHub")),
-            entity("b", credential("b", siteName = "Gitlab")),
-            entity("c", credential("c", siteName = "Amazon"))
-        )
-
-        val results = repository.search("git")
-
-        assertEquals(setOf("a", "b"), results.items.map { it.id }.toSet())
-    }
-
-    @Test
-    fun `search still reports rows it could not read`() = runTest {
-        // A row that cannot be decrypted cannot be excluded by a search term either.
-        // Filtering it away silently would recreate finding #40 in a narrower form.
-        coEvery { dao.getAll() } returns listOf(
-            entity("a", credential("a", siteName = "GitHub")),
-            corruptEntity("bad")
-        )
-
-        val results = repository.search("nothing-matches-this")
-
-        assertTrue(results.items.isEmpty())
-        assertEquals(1, results.undecryptableCount)
-    }
-
     // -- Snapshot semantics -----------------------------------------------------------------
 
     @Test

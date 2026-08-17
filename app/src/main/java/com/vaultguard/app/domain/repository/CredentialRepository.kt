@@ -20,5 +20,4 @@ interface CredentialRepository {
 
     suspend fun delete(id: String)
 
-    suspend fun search(query: String): VaultSnapshot<CredentialSummary>
 }

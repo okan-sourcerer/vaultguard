@@ -5,6 +5,7 @@ import com.vaultguard.app.data.repository.PasswordPresetRepository
 import com.vaultguard.app.domain.model.PasswordGeneratorConfig
 import com.vaultguard.app.domain.model.PasswordPreset
 import com.vaultguard.app.domain.usecase.GeneratePasswordUseCase
+import com.vaultguard.app.security.SecureClipboard
 import com.vaultguard.app.util.PasswordStrength
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.app.util.StrengthLevel
@@ -28,7 +29,8 @@ data class GeneratorUiState(
 class PasswordGeneratorViewModel @Inject constructor(
     private val generatePasswordUseCase: GeneratePasswordUseCase,
     private val strengthEvaluator: PasswordStrengthEvaluator,
-    private val presetRepository: PasswordPresetRepository
+    private val presetRepository: PasswordPresetRepository,
+    private val clipboard: SecureClipboard
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GeneratorUiState())
@@ -47,6 +49,10 @@ class PasswordGeneratorViewModel @Inject constructor(
             selectedPresetId = selected.id,
             config = selected.config
         )
+    }
+
+    fun onCopy(password: String) {
+        if (password.isNotEmpty()) clipboard.copyWithAutoExpiry("Password", password)
     }
 
     fun generate() {

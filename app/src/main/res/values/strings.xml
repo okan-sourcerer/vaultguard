@@ -1,4 +1,16 @@
 <resources>
     <string name="app_name">Vault Guard</string>
-    <string name="default_web_client_id">1030813209243-s7asvsob0ro44qski1k8qi0qi6aboikt.apps.googleusercontent.com</string>
+
+    <!--
+        default_web_client_id is deliberately NOT declared here.
+
+        The google-services plugin generates it from the client_type 3 entry in
+        google-services.json. Declaring it by hand as well worked only because both copies
+        happened to hold the same value: resources under app/src/main/res override generated
+        ones, so the hand-written entry silently won (finding #42).
+
+        Swap in a google-services.json from a different Firebase project and the stale
+        literal would keep overriding the correct value, and Google Sign-In would fail with
+        an error that points nowhere near the cause. One source of truth instead.
+    -->
 </resources>

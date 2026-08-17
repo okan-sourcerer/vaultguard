@@ -84,15 +84,12 @@ fun SettingsScreen(
     val activity = remember(context) {
         var ctx = context
         while (ctx is android.content.ContextWrapper) {
-            Timber.tag("SettingsScreen").d("Context unwrap: ${ctx::class.java.name}")
             if (ctx is androidx.fragment.app.FragmentActivity) return@remember ctx
             ctx = ctx.baseContext
         }
-        Timber.tag("SettingsScreen").e("Could NOT find FragmentActivity from context chain!")
+        Timber.tag("SettingsScreen").e("No FragmentActivity in the context chain; biometrics unavailable")
         null
     }
-    Timber.tag("SettingsScreen")
-        .d("activity=$activity, biometricAvailable=${uiState.biometricAvailable}, biometricEnabled=${uiState.biometricEnabled}")
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
     val autofillScope = rememberCoroutineScope()

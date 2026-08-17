@@ -44,6 +44,13 @@ Unit tests:
 ./gradlew :app:testDebugUnitTest
 ```
 
+Minified release build. It is signed with the debug key so it can be installed locally —
+replace that with a real keystore before distributing anything:
+
+```bash
+./gradlew :app:installRelease
+```
+
 `app/google-services.json` is committed and points at the `passwords-6e369` Firebase
 project. Cloud sync will not work against a different Firebase project without replacing
 that file and the `default_web_client_id` string in `app/src/main/res/values/strings.xml`.

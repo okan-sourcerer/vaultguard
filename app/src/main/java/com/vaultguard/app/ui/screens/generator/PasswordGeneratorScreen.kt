@@ -44,11 +44,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.vaultguard.app.security.SecureClipboard
 import com.vaultguard.app.ui.components.PasswordStrengthIndicator
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,8 +58,6 @@ fun PasswordGeneratorScreen(
     viewModel: PasswordGeneratorViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
-    val clipboard = remember { SecureClipboard(context) }
 
     // Save preset dialog
     if (uiState.showSaveDialog) {
@@ -212,7 +208,7 @@ fun PasswordGeneratorScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Row {
                         IconButton(onClick = {
-                            clipboard.copyWithAutoExpiry("Password", uiState.password)
+                            viewModel.onCopy(uiState.password)
                         }) {
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
                         }
@@ -274,7 +270,7 @@ fun PasswordGeneratorScreen(
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(onClick = {
-                            clipboard.copyWithAutoExpiry("Password", pass)
+                            viewModel.onCopy(pass)
                         }) {
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
                         }
