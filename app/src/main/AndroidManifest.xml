@@ -4,6 +4,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        Keeps the process running long enough to clear the clipboard. A cached process is
+        frozen within seconds on Android 12+, and a deferred WorkManager job is batched into
+        maintenance windows, so neither can honour a thirty-second window.
+        shortService needs no type-specific permission.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Optional: without it the service still runs, its notification is just not shown. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".VaultGuardApp"
         android:allowBackup="true"
@@ -36,6 +46,11 @@
                 android:name="android.autofill"
                 android:resource="@xml/autofill_service_config" />
         </service>
+
+        <service
+            android:name=".security.ClipboardClearService"
+            android:exported="false"
+            android:foregroundServiceType="shortService" />
 
         <activity
             android:name=".autofill.AutofillAuthActivity"

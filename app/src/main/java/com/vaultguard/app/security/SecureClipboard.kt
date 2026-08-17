@@ -9,11 +9,6 @@ import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -30,9 +25,6 @@ class SecureClipboard @Inject constructor(
         internal const val EXTRA_TOKEN = "com.vaultguard.clip.token"
         internal const val DATA_TOKEN = "token"
     }
-
-    private val scope = CoroutineScope(Dispatchers.Main)
-    private var pendingClear: Job? = null
 
     /**
      * Copies [text] and clears it again after 30 seconds.
@@ -53,26 +45,23 @@ class SecureClipboard @Inject constructor(
         }
         clipboard.setPrimaryClip(clip)
 
-        // Two timers, because neither alone is good enough.
+        // Handed to a foreground service rather than timed here.
         //
-        // WorkManager survives the process being killed, but it schedules on its own terms
-        // and can run well past the requested delay — fine for housekeeping, not for a
-        // window the user was told is thirty seconds.
+        // An in-process timer stops when Android freezes the process, which since Android
+        // 12 happens within seconds of the app being backgrounded — so a thirty-second
+        // delay never completed. A WorkManager job with an initial delay goes through
+        // JobScheduler, which batches deferred work; thirty seconds is a request, not a
+        // promise. Both were tried and neither fired.
         //
-        // The in-process timer is punctual but dies with the process. Whichever fires first
-        // does the work; the other then finds an empty or foreign clipboard and does
-        // nothing.
-        pendingClear?.cancel()
-        pendingClear = scope.launch {
-            delay(TimeUnit.SECONDS.toMillis(CLEAR_DELAY_SECONDS))
-            clearIfStillOurs(context, token)
-        }
+        // WorkManager stays on as a long-stop for the case where the service is killed:
+        // late is better than never.
+        ClipboardClearService.start(context, label, token, TimeUnit.SECONDS.toMillis(CLEAR_DELAY_SECONDS))
 
         val workManager = WorkManager.getInstance(context)
         workManager.cancelAllWorkByTag(WORK_TAG)
         workManager.enqueue(
             OneTimeWorkRequestBuilder<ClearClipboardWorker>()
-                .setInitialDelay(CLEAR_DELAY_SECONDS, TimeUnit.SECONDS)
+                .setInitialDelay(CLEAR_DELAY_SECONDS * 2, TimeUnit.SECONDS)
                 .setInputData(Data.Builder().putString(DATA_TOKEN, token).build())
                 .addTag(WORK_TAG)
                 .build()
@@ -81,8 +70,9 @@ class SecureClipboard @Inject constructor(
 }
 
 /**
- * Backstop for [SecureClipboard]'s in-process timer: survives the process being killed
- * before the window elapses. Delegates to the same routine so both paths behave alike.
+ * Long-stop for when the foreground service is killed before its window elapses. Runs at
+ * twice the delay, because it is only there to catch what the service missed — late is
+ * better than never, and it must not race the service into clearing a fresh clip.
  */
 class ClearClipboardWorker(
     context: Context,

@@ -164,7 +164,7 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
 | Offline extraction of `vault.db` | SQLCipher + per-payload AES-GCM; payloads need the master password |
 | Device thief with an unlocked phone | Auto-lock timeout, master password / biometric gate on the vault |
 | Screenshots, recents thumbnail | `FLAG_SECURE` on every activity that shows a password or takes the master password |
-| Clipboard scraping | Sensitive-clip flag, WorkManager clear after 30 s (#36 — clears indiscriminately) |
+| Clipboard scraping | Sensitive-clip flag; a foreground service clears after 30 s. Reads are restricted from Android 10, so the clear usually cannot confirm the clip is still ours and errs toward clearing |
 | Lookalike domains and hostile package names in autofill | One matcher for both paths; hosts compared on dot boundaries, packages by explicit link or reverse-DNS derivation |
 | Password reuse against known breaches | HIBP k-anonymity range query; only a 5-char SHA-1 prefix is sent, and a failed check reports as unavailable rather than clean |
 | Cloud provider reading the vault | Only ciphertext and IVs reach Firestore; the salt is stored but useless alone |

@@ -258,9 +258,19 @@ and one that only shows up by using the app, since nothing in the code says the 
 restricted.
 
 Corrected by inverting the default: clear unless the clip is *positively* identified as
-another app's. An in-process timer was added alongside the worker, because WorkManager
-schedules on its own terms and a thirty-second security window deserves better than
-best-effort timing.
+another app's.
+
+That exposed a second problem — nothing was firing the clear on time, or at all. An
+in-process timer stops when Android freezes the process, which since Android 12 happens
+within seconds of the app being backgrounded. A WorkManager job with an initial delay goes
+through JobScheduler, which batches deferred work into maintenance windows. Both were
+tried; neither honours a thirty-second window while the user is in another app, which is
+the only moment that matters for a clipboard.
+
+Now handled by a `shortService` foreground service, which is exempt from freezing and from
+background execution limits, with WorkManager left on at double the delay as a long-stop.
+The notification it must post is itself useful: it says a password is on the clipboard and
+offers to clear it early.
 
 ## Documentation defects (fixed 2026-08-17)
 
