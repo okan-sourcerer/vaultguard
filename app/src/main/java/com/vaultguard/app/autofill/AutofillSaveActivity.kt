@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.vaultguard.app.domain.model.Credential
+import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.domain.usecase.UnlockVaultUseCase
 import com.vaultguard.app.security.MasterPasswordManager
@@ -52,6 +54,12 @@ class AutofillSaveActivity : ComponentActivity() {
         const val EXTRA_PASSWORD = "password"
         const val EXTRA_WEB_DOMAIN = "web_domain"
         const val EXTRA_PACKAGE_NAME = "app_package"
+
+        /**
+         * Id of the entry whose password was rotated on the site (#56). When set, this
+         * screen offers to replace that password rather than to create a second entry.
+         */
+        const val EXTRA_UPDATE_ID = "update_id"
     }
 
     @Inject lateinit var credentialRepository: CredentialRepository
@@ -68,6 +76,7 @@ class AutofillSaveActivity : ComponentActivity() {
         val password = intent.getStringExtra(EXTRA_PASSWORD) ?: ""
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN) ?: ""
         val appPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
+        val updateId = intent.getStringExtra(EXTRA_UPDATE_ID)
 
         val suggestedName = webDomain.ifEmpty {
             appPackage.split(".").lastOrNull() ?: "Unknown"
@@ -94,6 +103,25 @@ class AutofillSaveActivity : ComponentActivity() {
                             unlockVaultUseCase = unlockVaultUseCase,
                             onUnlocked = { unlocked = true },
                             onCancel = { finish() }
+                        )
+                        return@Surface
+                    }
+
+                    // A password rotated on the site: replace the stored one rather than
+                    // leaving the vault holding a value the site will now reject (#56).
+                    if (updateId != null) {
+                        UpdatePasswordPrompt(
+                            credentialId = updateId,
+                            newPassword = password,
+                            repository = credentialRepository,
+                            onSkip = {
+                                dismissedPrefs.markDismissed(
+                                    webDomain.ifEmpty { null },
+                                    appPackage.ifEmpty { null }
+                                )
+                                finish()
+                            },
+                            onFinished = { finish() }
                         )
                         return@Surface
                     }
@@ -201,6 +229,104 @@ class AutofillSaveActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * Offers to replace the password of an entry the vault already holds (finding #56).
+ *
+ * Reached when the captured credential matches a stored account but its password differs —
+ * a rotation on the website. The old rule read that as a duplicate and dropped it, so the
+ * vault kept a password the site had stopped accepting.
+ *
+ * Nothing but the password is touched: name, URL, notes, category, tags and pin all stay
+ * as they are, and the repository advances `passwordChangedAt` because the password really
+ * did change.
+ */
+@Composable
+private fun UpdatePasswordPrompt(
+    credentialId: String,
+    newPassword: String,
+    repository: CredentialRepository,
+    onSkip: () -> Unit,
+    onFinished: () -> Unit
+) {
+    var lookup by remember { mutableStateOf<CredentialLookup?>(null) }
+    var isBusy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(credentialId) {
+        lookup = repository.getById(credentialId)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (val current = lookup) {
+            null -> Text("Checking your vault…", style = MaterialTheme.typography.bodyMedium)
+
+            is CredentialLookup.Found -> {
+                val credential = current.credential
+                Text("Password changed?", style = MaterialTheme.typography.headlineSmall)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "The password you just entered for ${credential.displayName} is not the " +
+                        "one saved for ${credential.username.ifEmpty { "this account" }}.\n\n" +
+                        "Replace the saved password? Everything else about the entry stays " +
+                        "as it is.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = onSkip,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Skip") }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Button(
+                        onClick = {
+                            if (isBusy) return@Button
+                            isBusy = true
+                            scope.launch {
+                                repository.save(credential.copy(password = newPassword))
+                                onFinished()
+                            }
+                        },
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (isBusy) "Updating…" else "Update") }
+                }
+            }
+
+            // Both are dead ends for an update: there is no sound entry to write onto.
+            // Say so rather than silently discarding what the user typed, and rather than
+            // overwriting a row that could not be read (rule 2).
+            is CredentialLookup.Undecryptable -> DeadEnd(
+                "That saved entry could not be decrypted, so its password cannot be " +
+                    "replaced. Open VaultGuard to deal with it.",
+                onFinished
+            )
+
+            CredentialLookup.NotFound -> DeadEnd(
+                "That saved entry no longer exists. Open VaultGuard to add it again.",
+                onFinished
+            )
+
+            CredentialLookup.Locked -> DeadEnd(
+                "VaultGuard locked before the entry could be read. Try again.",
+                onFinished
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeadEnd(message: String, onDismiss: () -> Unit) {
+    Text(message, style = MaterialTheme.typography.bodyMedium)
+    Spacer(modifier = Modifier.height(16.dp))
+    Button(onClick = onDismiss) { Text("Close") }
 }
 
 /**

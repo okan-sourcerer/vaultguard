@@ -15,7 +15,8 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | P2 — sync (#19–#24) | all fixed, #22 obsolete |
 | P3 — business logic and UX (#25–#40) | all fixed |
 | P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
-| P1b — autofill usability (#47–#56) | all fixed except #56 |
+| P1b — autofill usability (#47–#56) | all fixed |
+| P5 — flow and interaction (#57–#60) | #57 fixed |
 
 **Still open**, all deliberate rather than forgotten:
 
@@ -23,7 +24,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | --- | --- | --- |
 | 4 (part) | Joining an account that already holds a different vault | The data-loss halves are fixed and a mismatch now refuses rather than merging. Designing the join flow needs a second device |
 | 45 (part) | `GoogleSignIn` → Credential Manager | A different auth flow with its own failure modes. Deserves its own change, not a line in a hygiene pass |
-| 56 | A rotated password is never offered for saving | Needs an update-existing flow in the save activity rather than the create-only one there now. Found while fixing #55 |
+| 58, 59, 60 | Pin moves the "Updated" date; delete has no undo; Add/Edit loses typed changes on Back | Found by the flow audit of 2026-08-18. Each is a decision about what the app should do, not a correction, so they are worth deciding rather than patching |
 
 Verified on the owner's device against both the debug and the minified release build:
 vault loads, biometric unlock, autofill in a third-party app, and clipboard clearing.
@@ -158,7 +159,7 @@ correct and one worth switching on.
 | 53 | `settingsActivity` points at `MainActivity`, landing on the unlock screen | `res/xml/autofill_service_config.xml` | **fixed** (chunk 14) |
 | 54 | Only the last fill context is read, so a two-step login saves a blank username | `autofill/VaultAutofillService.kt:131` | **fixed** (chunk 14) |
 | 55 | Duplicate check compares the blank username, so #54 also creates a duplicate | `autofill/VaultAutofillService.kt:164-166` | **fixed** (chunk 14) |
-| 56 | A password changed on the site is treated as a duplicate and never saved | `autofill/VaultAutofillService.kt`, `autofill/AutofillSaveActivity.kt` | open |
+| 56 | A password changed on the site is treated as a duplicate and never saved | `autofill/VaultAutofillService.kt`, `autofill/AutofillSaveActivity.kt` | **fixed** (chunk 15) |
 
 **#47** — `SaveCallback.onSuccess(IntentSender)` exists precisely so the *system* launches
 the dialog. Calling `startActivity` from a backgrounded service is blocked on Android 10
@@ -195,6 +196,43 @@ now wrong, and the next autofill types a password the site will reject. Fixing i
 account?" — rather than the create-only flow it has, which is why it is not folded into
 #55.
 
+
+## P5 — Flow and interaction
+
+Found by asking, of each action the UI offers, whether it can be reversed the same way it
+was made, and whether the app tells the truth about what it just did. The 2026-08-17 review
+looked for defects *within* a screen; these are defects in the path between screens, which
+is why none of them showed up then.
+
+| # | Defect | Location | Status |
+| --- | --- | --- | --- |
+| 57 | The list can unpin but never pin; pinning needs the edit screen | `ui/screens/vault/VaultScreen.kt:398` | **fixed** (chunk 15) |
+| 58 | Pinning changes the "Updated" date shown on the detail screen | `ui/screens/detail/CredentialDetailScreen.kt:316` | open |
+| 59 | Delete is a soft delete with no restore path and no undo | `ui/screens/detail/CredentialDetailScreen.kt:73` | open |
+| 60 | Add/Edit discards typed changes on Back with no warning | `ui/screens/addEdit/AddEditScreen.kt:79` | open |
+
+**#57** — the pin `IconButton` rendered only `if (credential.isPinned)`, so the affordance
+existed in one direction. A swipe-right gesture could pin, but its only indication is a
+background icon revealed by the swipe already being under way, so nothing announces it. The
+practical route to pinning was: open the entry, edit, toggle, save. Reported by the owner
+using the app, after a code reading of the same lines concluded the opposite — the toggle
+call is there, the *condition around it* is the bug.
+
+**#58** — the other half of #29. That finding separated "row last written" from "password
+last changed" and pointed the password-age display at the new column, but the detail
+screen's `Updated:` line still reads `updatedAt`, which every write moves. Pinning an entry
+is a write, so it reports the credential as updated today when nothing about it changed.
+`updatedAt` cannot simply stop moving — sync pushes a row when `updatedAt > syncedAt`, and
+the pin state travels in the encrypted payload, so it genuinely must be pushed. The fix
+belongs on the display side.
+
+**#59** — `delete` sets `isDeleted` and keeps the row, so the data survives a mistaken tap,
+but nothing in the UI can reach it afterwards and the confirmation dialog is the only
+safety. A tombstone the user cannot open is indistinguishable from a hard delete, while
+still costing the storage and the sync traffic of a real row.
+
+**#60** — Back leaves Add/Edit immediately. Anything typed is gone with no prompt, on a
+screen where the thing being typed is a password that may exist nowhere else yet.
 
 ## P2 — Sync correctness
 

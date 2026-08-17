@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
@@ -395,14 +396,24 @@ private fun CredentialCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-                if (credential.isPinned) {
-                    IconButton(onClick = onTogglePin) {
-                        Icon(
-                            imageVector = Icons.Filled.PushPin,
-                            contentDescription = "Unpin",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                // Shown in both states. It used to render only when already pinned, so the
+                // list could unpin but never pin, and the swipe gesture that could — with
+                // no affordance until the swipe is under way — was the only route short of
+                // opening the entry and editing it (finding #57).
+                IconButton(onClick = onTogglePin) {
+                    Icon(
+                        imageVector = if (credential.isPinned) {
+                            Icons.Filled.PushPin
+                        } else {
+                            Icons.Outlined.PushPin
+                        },
+                        contentDescription = if (credential.isPinned) "Unpin" else "Pin",
+                        tint = if (credential.isPinned) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
                 }
             }
         }

@@ -227,18 +227,8 @@ class VaultAutofillService : AutofillService() {
                     emptyList()
                 }
 
-                // With #54 fixed the username is populated for a two-step login, so the
-                // usual comparison works again. It can still be empty on a genuine
-                // password-only screen — a re-authentication prompt — and there the safe
-                // reading is that this belongs to an account already held, rather than a
-                // new blank-username entry beside it (#55).
-                val isDuplicate = if (username.isEmpty()) {
-                    known.isNotEmpty()
-                } else {
-                    known.any { it.username == username }
-                }
-
-                if (isDuplicate) {
+                val decision = SaveDecision.decide(username, password, known)
+                if (decision == SaveDecision.Outcome.Ignore) {
                     callback.onSuccess()
                     return@launch
                 }
@@ -248,6 +238,11 @@ class VaultAutofillService : AutofillService() {
                     putExtra(AutofillSaveActivity.EXTRA_PASSWORD, password)
                     putExtra(AutofillSaveActivity.EXTRA_WEB_DOMAIN, merged.webDomain)
                     putExtra(AutofillSaveActivity.EXTRA_PACKAGE_NAME, merged.packageName)
+                    // Set when the site's password was rotated, so the save screen offers
+                    // to replace the stored one instead of adding a second entry (#56).
+                    (decision as? SaveDecision.Outcome.UpdateExisting)?.let {
+                        putExtra(AutofillSaveActivity.EXTRA_UPDATE_ID, it.id)
+                    }
                 }
 
                 // Hand the system an IntentSender and let *it* launch the dialog.
