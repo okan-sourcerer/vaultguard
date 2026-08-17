@@ -61,6 +61,15 @@ import androidx.lifecycle.repeatOnLifecycle
 import timber.log.Timber
 import androidx.core.net.toUri
 
+/**
+ * Where the autofill service is chosen. The app used to point at
+ * "System → Languages & Input", which has not been correct for several Android versions —
+ * so anyone following it went looking in the wrong place.
+ */
+private const val AUTOFILL_SETTINGS_PATH =
+    "Settings → Passwords, passkeys & accounts → Autofill service " +
+        "(on Samsung: General management → Passwords)"
+
 @Suppress("AssignedValueIsNeverRead")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +94,7 @@ fun SettingsScreen(
         .d("activity=$activity, biometricAvailable=${uiState.biometricAvailable}, biometricEnabled=${uiState.biometricEnabled}")
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val autofillScope = rememberCoroutineScope()
 
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -320,48 +330,95 @@ fun SettingsScreen(
             }
 
             // Autofill section
-            if (uiState.autofillSupported) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Autofill", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Autofill", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (!uiState.autofillSupported) {
+                Text(
+                    "This device does not support autofill.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            if (uiState.autofillEnabled) "VaultGuard is your autofill service"
+                            else "VaultGuard is not your autofill service",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            if (uiState.autofillEnabled)
+                                "Android will offer your saved passwords in other apps."
+                            else
+                                "Android only sends fill requests to the one service you " +
+                                    "choose, so nothing is offered until VaultGuard is selected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // A Switch was the wrong control: Android has no intent to *unset*
+                        // an autofill service, so the off position could never do anything
+                        // (finding #37). It fired the same "enable me" intent both ways.
+                        if (!uiState.autofillEnabled) {
+                            Button(
+                                onClick = {
+                                    val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE)
+                                        .apply { data = "package:${context.packageName}".toUri() }
+                                    val opened = runCatching { context.startActivity(intent) }.isSuccess
+                                    if (!opened) {
+                                        autofillScope.launch {
+                                            snackbarHostState.showSnackbar(AUTOFILL_SETTINGS_PATH)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Enable VaultGuard") }
+                        } else {
+                            Text(
+                                "To turn it off or switch services, pick a different one in " +
+                                    "system settings.\n\n" + AUTOFILL_SETTINGS_PATH,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Open system settings") }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Autofill service", style = MaterialTheme.typography.bodyLarge)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Using Chrome?", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            if (uiState.autofillEnabled) "VaultGuard is your autofill provider"
-                            else "Tap to enable VaultGuard as autofill provider",
+                            "Chrome handles password fields with its own manager and ignores " +
+                                "the system service until told otherwise. Open Chrome's " +
+                                "settings and look for autofill services, then allow another " +
+                                "service. The exact wording moves between Chrome versions.\n\n" +
+                                "Most other browsers — Firefox, Samsung Internet, Brave, Edge, " +
+                                "DuckDuckGo — need nothing beyond the setting above.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    val autofillScope = rememberCoroutineScope()
-                    Switch(
-                        checked = uiState.autofillEnabled,
-                        onCheckedChange = {
-                            val intent = Intent(Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE).apply {
-                                data = "package:${context.packageName}".toUri()
-                            }
-                            val canResolve = context.packageManager
-                                .resolveActivity(intent, 0) != null
-                            if (canResolve) {
-                                try { context.startActivity(intent) } catch (_: Exception) { }
-                            }
-                            // Always show the path — some devices resolve the intent silently
-                            autofillScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    "Go to Settings → System → Languages & Input → Autofill service"
-                                )
-                            }
-                        }
-                    )
                 }
-            }
 
                 if (uiState.dismissedSavePrompts > 0) {
                     Row(
@@ -382,6 +439,7 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
 
             // Backup section
             Spacer(modifier = Modifier.height(16.dp))
