@@ -24,12 +24,11 @@ migrations in `VaultMigrations`.
 `CredentialEntity` overrides `equals`/`hashCode` to compare on `id` only — deliberate,
 because `ByteArray` identity comparison would break list diffing.
 
-Two known problems recorded here so a migration can address them together:
-
-Both were addressed in v2: schema export is on and committed, and `passwordChangedAt`
-separates password rotation from row writes. The v2 backfill sets `passwordChangedAt`
-= `updatedAt` for pre-existing rows, which is an upper bound rather than the truth —
-the real date was never recorded, so entries may report as newer than they are.
+Two problems from the v1 schema were addressed together in v2: schema export is now on
+and both versions are committed, and `passwordChangedAt` separates password rotation from
+row writes (#29). The backfill sets `passwordChangedAt` = `updatedAt` for pre-existing
+rows, which is an upper bound rather than the truth — the real date was never recorded,
+so entries migrated from v1 may report as newer than they are.
 
 ## Credential payload JSON
 
