@@ -177,19 +177,32 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
 - **Malicious accessibility services or keyloggers.** Nothing prevents another app with
   a11y privileges from reading typed input.
 - **A forgotten master password.** There is no recovery mechanism, no escrow, no hint.
-  This is intentional but is currently *undisclosed to the user* (#39).
+  Intentional, and stated at setup, which now requires acknowledging it.
 - **Online brute force by someone who can change the device clock.** `UnlockThrottle`
   escalates to an hour and survives a restart, but the lockout is wall-clock based, so a
   forward clock change ends the wait. The durable cost of a guess is the Argon2id
   derivation, not the throttle.
 - **Traffic analysis of HIBP queries.** The prefix reveals a 1-in-~16 bucket of the hash.
+- **Anything on a clipboard the user pastes elsewhere.** The 30-second clear reduces the
+  window; it does not follow the data.
 
-### Known live weaknesses
+### Where intent and reality now stand
 
-The threat model above describes intent. It is not currently met. The gaps are catalogued
-in [FINDINGS.md](FINDINGS.md); the security-relevant ones are #9–#18, and the data-loss
-ones (#1–#8) matter more than any of them because a destroyed vault fails every property
-at once.
+The table above described intent that the code did not meet when it was written. Findings
+#1–#18 were the gap, and all of them are closed: the destructive recovery path, the backup
+that could not be restored, the autofill matchers that filled a lookalike domain, the
+throttle that reset on restart, the breach check that reported an unreachable service as
+clean.
+
+What remains open is listed in [FINDINGS.md](FINDINGS.md) and is either device-dependent
+polish or separate work — nothing that breaks a property claimed above. Two limits worth
+keeping in view because they are structural rather than unfinished:
+
+- the Firestore vault document carries the salt and verification blob, so whoever holds
+  the account can attempt an offline attack on the master password at Argon2id cost per
+  guess. See [SYNC.md](SYNC.md);
+- the SQLCipher passphrase is independent of the master password, so the database opens
+  whenever the device does. Only payload contents are gated on the master password.
 
 ## Rules for contributors
 

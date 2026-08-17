@@ -4,10 +4,15 @@ An offline-first Android password manager. Credentials are encrypted on-device w
 key derived from a master password that never leaves the device and is never stored.
 Optional Google-account sync replicates only encrypted blobs.
 
-**Status: pre-1.0, single-install.** Not published. Not audited. See
-[docs/FINDINGS.md](docs/FINDINGS.md) for known defects — several are data-loss bugs that
-are actively being fixed. Do not install this on a device whose vault you cannot afford
-to lose until the P0 items in [docs/REMEDIATION-PLAN.md](docs/REMEDIATION-PLAN.md) are done.
+**Status: pre-1.0, single-install.** Not published. Not audited.
+
+A full review in August 2026 found 53 defects, including eight that could destroy or
+orphan a vault. All of those are fixed, along with every security and sync finding; the
+remainder are catalogued in [docs/FINDINGS.md](docs/FINDINGS.md) with what is left still
+open. The debug and minified release builds have both been exercised on a device.
+
+Keep your own backup regardless. Nothing here has been audited by anyone but its authors,
+and a forgotten master password is unrecoverable by design.
 
 ## What it does
 

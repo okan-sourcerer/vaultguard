@@ -19,7 +19,7 @@ migrations in `VaultMigrations`.
 | `updatedAt` | `INTEGER` | Any write to the row: edit, pin toggle, re-encryption sweep |
 | `passwordChangedAt` | `INTEGER` | When the password itself last changed. Added in v2; backfilled from `createdAt` in v3 |
 | `syncedAt` | `INTEGER?` | Epoch millis of last successful push/pull; `NULL` = never synced |
-| `isDeleted` | `INTEGER` | Tombstone flag; rows are soft-deleted and never purged |
+| `isDeleted` | `INTEGER` | Tombstone flag. Deletes are soft; sync purges tombstones both sides have seen after 30 days |
 
 `CredentialEntity` overrides `equals`/`hashCode` to compare on `id` only — deliberate,
 because `ByteArray` identity comparison would break list diffing.
@@ -41,8 +41,8 @@ across untouched — re-encryption is not a rotation.
 
 ## Credential payload JSON
 
-The plaintext that gets sealed into `encryptedPayload`. Produced by
-`CredentialRepositoryImpl.credentialToJson`, consumed by `jsonToCredential`.
+The plaintext that gets sealed into `encryptedPayload`. Read and written by
+`CredentialPayloadCodec`.
 
 ```json
 {
@@ -64,17 +64,18 @@ Encoding is UTF-8. All reads use `optString` / `optBoolean` / `optJSONArray` wit
 defaults, so **adding a field is backward-compatible** and older payloads decode fine.
 Removing or renaming a field is not.
 
-Identity and timestamps live on the *row*, not in the payload — `id`, `createdAt`, and
-`updatedAt` are read from `CredentialEntity` when reconstructing a `Credential`. Anything
-that needs to be searchable without decrypting must move out of the payload; today
-nothing is, which is why search decrypts the entire vault.
+Identity and timestamps live on the *row*, not in the payload — `id`, `createdAt`,
+`updatedAt` and `passwordChangedAt` come from `CredentialEntity` when reconstructing a
+`Credential`. Nothing searchable lives outside the payload, so filtering happens on
+already-decrypted summaries in `VaultViewModel` rather than in a query.
 
 `VaultAutofillService` and `AutofillAuthActivity` parse this JSON independently and read
 only a subset of fields. Any payload change needs those two call sites checked too.
 
-## Backup file — format v1
+## Backup file — format v1 (read-only)
 
-Written by `ExportVaultUseCase`, read by `ImportVaultUseCase`. Pretty-printed UTF-8 JSON.
+No longer written; still accepted by `ImportVaultUseCase` so existing files stay usable.
+Pretty-printed UTF-8 JSON.
 
 ```json
 {
@@ -86,8 +87,8 @@ Written by `ExportVaultUseCase`, read by `ImportVaultUseCase`. Pretty-printed UT
 }
 ```
 
-`encryptedVault` decrypts (AES-256-GCM, under the **session key**) to a JSON array of
-row-shaped objects:
+`encryptedVault` decrypts (AES-256-GCM, under the key derived from the master password
+of the day) to a JSON array of row-shaped objects:
 
 ```json
 [
@@ -101,26 +102,22 @@ row-shaped objects:
 ]
 ```
 
-### The v1 defect
+### Why v1 was replaced
 
-The format is **doubly encrypted with two different keys, and only one of them travels
-with the file.**
+The format was doubly encrypted, and the importer only ever undid one layer. The outer
+envelope was sealed under the export-time key and the file recorded the salt to re-derive
+it; each inner `encryptedPayload` was sealed under that *same* key, but the importer
+re-inserted those bytes verbatim. So an import reported success, rows landed in the
+database, and every credential then failed to decrypt — swallowed into an empty list by
+#40. It round-tripped only onto the exporting device with an unchanged master password,
+while the dialog promised more (finding #3).
 
-- The outer envelope is sealed under the session key, and the file records the `salt`
-  needed to re-derive it. That part round-trips.
-- Each inner `encryptedPayload` is still sealed under the *export-time master key*. The
-  importer re-inserts those bytes verbatim without re-encrypting them.
+The importer now decrypts both layers and re-seals each credential under the receiving
+vault's key, so **v1 files are restorable anywhere** — which they never were. Only the
+backup password from the time is needed.
 
-So an import succeeds — the outer layer decrypts, rows land in the database — and then
-every credential fails to decrypt, and the failure is swallowed into an empty list (#40).
-
-v1 only round-trips correctly when the importing device's current master key is byte-identical
-to the exporting one: **same device, same master password, unchanged salt.** The import
-dialog promises more than that ("enter the master password that was used when this backup
-was created"), which is finding #3.
-
-`isDeleted` and `syncedAt` are not exported. Imported rows therefore always arrive as
-live, never-synced entries — which is correct behaviour, just undocumented.
+`isDeleted` and `syncedAt` are not present in v1 files, so imported rows arrive live and
+never-synced.
 
 ### Import modes
 
@@ -199,29 +196,36 @@ vaults/{uid}                          ← document
   salt:                   string (base64)
   verificationCiphertext: string (base64)
   verificationIv:         string (base64)
+  vaultKeyCiphertext:     string (base64)   ← vault key, sealed under the master key
+  vaultKeyIv:             string (base64)
 
 vaults/{uid}/credentials/{credentialId}   ← subcollection
-  encryptedPayload: string (base64)
-  iv:               string (base64)
-  createdAt:        number (epoch millis, writing device's clock)
-  updatedAt:        number (epoch millis, writing device's clock)
-  isDeleted:        boolean
+  encryptedPayload:  string (base64)
+  iv:                string (base64)
+  createdAt:         number (epoch millis, writing device's clock)
+  updatedAt:         number (epoch millis, writing device's clock)
+  passwordChangedAt: number (epoch millis, writing device's clock)
+  isDeleted:         boolean
+  serverUpdatedAt:   timestamp (assigned by Firestore)
 ```
 
-`{uid}` is the Firebase Auth UID — anonymous or Google-linked. Changing accounts changes
-the vault path, which is what `migrateFromAnonymousUser` exists to paper over.
+`{uid}` is the Firebase Auth UID, always a real signed-in account. Nothing signs in
+anonymously any more, so there is no anonymous vault and no migration between UIDs.
 
-`syncedAt` is deliberately local-only and never uploaded.
+`serverUpdatedAt` is what pull ordering uses. The two epoch-millis fields are the writing
+device's clock and are meaningful only on that device — comparing them across devices
+silently dropped changes (#20). `syncedAt` is local-only and never uploaded.
 
-Two structural problems, both detailed in [SYNC.md](SYNC.md):
+**The wrapped vault key is what makes a second device workable.** Without it a device can
+verify the master password and still not reach the key the rows are encrypted under, which
+is how adopting a remote config used to orphan a vault (#4). It is sealed under the
+master-derived key, so it is no more use to whoever holds the account than the verification
+blob beside it.
 
-- `createdAt` / `updatedAt` are **client wall-clock values**, compared across devices.
-  Clock skew silently drops changes (#20). They need to become server timestamps or a
-  monotonic per-vault revision.
-- The vault document stores the salt and verification blob, so whoever holds the account
-  can attempt an offline brute force of the master password against
-  `verificationCiphertext`. That is inherent to cross-device sync of this design and is
-  the reason the Argon2 cost parameters matter.
+That said, the vault document stores the salt and verification blob, so whoever holds the
+account can attempt an **offline attack on the master password** at Argon2id cost per
+guess. Inherent to cross-device sync of this design, and the reason the Argon2 parameters
+must not be weakened. See [SYNC.md](SYNC.md).
 
 ## Preference stores
 

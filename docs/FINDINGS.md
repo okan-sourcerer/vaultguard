@@ -1,9 +1,34 @@
 # Known defects
 
-Catalogue from the full-project review of 2026-08-17. Numbering is stable — the
-remediation plan and commit messages reference these IDs. Update **Status** as fixes land.
+Catalogue from the full-project review of 2026-08-17, plus #47–#53 found later by using
+the app rather than reading it. Numbering is stable — the remediation plan and commit
+messages reference these IDs. Update **Status** as fixes land.
 
 Status values: `open`, `in progress`, `fixed`, `won't fix`.
+
+## Summary
+
+| Group | State |
+| --- | --- |
+| P0 — vault destruction and data loss (#1–#8) | all fixed |
+| P1 — security (#9–#18) | all fixed |
+| P2 — sync (#19–#24) | all fixed, #22 obsolete |
+| P3 — business logic and UX (#25–#40) | all fixed |
+| P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
+| P1b — autofill usability (#47–#53) | #47, #48, #49, #52 fixed |
+
+**Still open**, all deliberate rather than forgotten:
+
+| # | Item | Why it is still open |
+| --- | --- | --- |
+| 4 (part) | Joining an account that already holds a different vault | The data-loss halves are fixed and a mismatch now refuses rather than merging. Designing the join flow needs a second device |
+| 45 (part) | `GoogleSignIn` → Credential Manager | A different auth flow with its own failure modes. Deserves its own change, not a line in a hygiene pass |
+| 50 | Inline autofill suggestions | Needs a device to judge; held for the usability pass |
+| 51 | `cancellationSignal` ignored in `onFillRequest` | Same |
+| 53 | `settingsActivity` points at `MainActivity` | Same |
+
+Verified on the owner's device against both the debug and the minified release build:
+vault loads, biometric unlock, autofill in a third-party app, and clipboard clearing.
 
 ## P0 — Vault destruction / silent data loss
 

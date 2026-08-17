@@ -407,4 +407,27 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 11 — Business logic + UX | #25–#28, #30, #33, #36, #39 | **done** — 24 tests |
 | 12 — Build + hygiene | #41–#46 | **done** — release build verified |
 | 13 — Breach check honesty | #14 | **done** — 15 tests |
+| 13a — Clipboard actually clears | #36 regression | **done** — foreground service; the first two attempts never fired |
 | 14 — Usability pass | #50, #51, #53 and whatever it turns up | not started |
+
+## Picking this up again
+
+Every chunk through 13a is done and verified on the device. The next piece of work is the
+usability pass, and it is worth doing before the three findings held for it, because it
+will probably find more.
+
+Chunks 8a and 13a are the argument for that ordering. Both exist because the owner used
+the app and found things no amount of code review had: autofill that could not save at
+all, dismissals that silenced every website at once, a clipboard that never cleared. In
+each case the cause was a platform rule invisible in the source — background activity
+launches, a null return where an exception would have been noticed, process freezing.
+
+Three habits from this work worth keeping:
+
+- **Write the failing test first where the logic is pure.** It caught a wrong backfill, an
+  off-by-one in the lockout table, and a normaliser that turned `password123` into
+  `passwordi2e` — all in code that read correctly.
+- **Fix the cause, not the symptom.** Chunk 6.5 removed the need for the machinery chunk 5
+  had just built, and deleted more than it added.
+- **Verify on the device before believing it.** Twice, a fix that compiled, passed, and
+  read correctly did nothing at all when run.
