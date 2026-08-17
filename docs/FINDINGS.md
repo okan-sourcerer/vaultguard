@@ -16,7 +16,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | P3 — business logic and UX (#25–#40) | all fixed |
 | P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
 | P1b — autofill usability (#47–#56) | all fixed |
-| P5 — flow and interaction (#57–#60) | #57 fixed |
+| P5 — flow and interaction (#57–#63) | #57 fixed |
 
 **Still open**, all deliberate rather than forgotten:
 
@@ -200,9 +200,14 @@ account?" — rather than the create-only flow it has, which is why it is not fo
 ## P5 — Flow and interaction
 
 Found by asking, of each action the UI offers, whether it can be reversed the same way it
-was made, and whether the app tells the truth about what it just did. The 2026-08-17 review
-looked for defects *within* a screen; these are defects in the path between screens, which
-is why none of them showed up then.
+was made, whether the app tells the truth about what it just did, and whether a write
+preserves what the screen doing the writing does not model. The 2026-08-17 review looked
+for defects *within* a screen; these are defects in the path between screens, which is why
+none of them showed up then.
+
+The audit covered the vault list, detail, Add/Edit, generator, settings, unlock and
+recovery screens. It started because the owner reported #57 after a code reading of the
+same lines had concluded the opposite.
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
@@ -210,6 +215,9 @@ is why none of them showed up then.
 | 58 | Pinning changes the "Updated" date shown on the detail screen | `ui/screens/detail/CredentialDetailScreen.kt:316` | open |
 | 59 | Delete is a soft delete with no restore path and no undo | `ui/screens/detail/CredentialDetailScreen.kt:73` | open |
 | 60 | Add/Edit discards typed changes on Back with no warning | `ui/screens/addEdit/AddEditScreen.kt:79` | open |
+| 61 | Editing a credential silently drops its autofill links | `ui/screens/addEdit/AddEditViewModel.kt:168-180` | open |
+| 62 | Deleting a generator preset is one accidental tap, with no confirmation | `ui/screens/generator/PasswordGeneratorScreen.kt:146` | open |
+| 63 | Auto-lock timeout reads "1 minutes" | `ui/screens/settings/SettingsScreen.kt:248,256` | open |
 
 **#57** — the pin `IconButton` rendered only `if (credential.isPinned)`, so the affordance
 existed in one direction. A swipe-right gesture could pin, but its only indication is a
@@ -233,6 +241,24 @@ still costing the storage and the sync traffic of a real row.
 
 **#60** — Back leaves Add/Edit immediately. Anything typed is gone with no prompt, on a
 screen where the thing being typed is a password that may exist nowhere else yet.
+
+**#61** — the worst of this group, because it destroys data and says nothing.
+`AddEditViewModel.onSave` constructs a fresh `Credential` from the form fields, and the
+form has no field for `linkedPackages` or `linkedDomains`, so both take their `emptyList()`
+default and overwrite what was stored. Those two lists are how [CredentialMatcher](../app/src/main/java/com/vaultguard/app/autofill/CredentialMatcher.kt)
+ranks a match — package is rank 0, domain rank 1, its two strongest signals — and only
+`AutofillSaveActivity` ever sets them. So an entry captured by autofill works until the
+first time it is edited for any reason, after which autofill quietly stops offering it for
+the app it was captured from. Nothing in the UI reports the loss, and the entry still looks
+complete. Editing must carry unmodelled fields forward rather than rebuilding the object
+from the form.
+
+**#62** — the preset delete button sits *inside* the dropdown row that selects the preset,
+so the tap that chooses one and the tap that destroys one are millimetres apart, and the
+destructive one has no confirmation and no undo.
+
+**#63** — `"$minutes minutes"` and `"${uiState.autoLockTimeout} minutes"` both render the
+one-minute case as "1 minutes".
 
 ## P2 — Sync correctness
 
