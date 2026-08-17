@@ -24,8 +24,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import timber.log.Timber
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -146,27 +146,33 @@ class VaultAutofillService : AutofillService() {
             return
         }
 
-        // Check for duplicates off main thread, but keep onSaveRequest synchronous
-        if (masterPasswordManager.isVaultUnlocked) {
-            val isDuplicate = runBlocking(Dispatchers.IO) {
-                val existing = findMatchingCredentials(parsed.webDomain, parsed.packageName)
-                existing.any { it.username == username }
-            }
-            if (isDuplicate) {
-                callback.onSuccess()
-                return
-            }
-        }
+        // The duplicate check decrypts the whole vault, which used to happen inside
+        // runBlocking on the main thread — an ANR that scaled with vault size (finding #18).
+        // SaveCallback may be answered asynchronously, so do the work off-thread and
+        // respond when it is done.
+        scope.launch {
+            try {
+                val isDuplicate = masterPasswordManager.isVaultUnlocked &&
+                    findMatchingCredentials(parsed.webDomain, parsed.packageName)
+                        .any { it.username == username }
 
-        val saveIntent = Intent(this, AutofillSaveActivity::class.java).apply {
-            putExtra(AutofillSaveActivity.EXTRA_USERNAME, username)
-            putExtra(AutofillSaveActivity.EXTRA_PASSWORD, password)
-            putExtra(AutofillSaveActivity.EXTRA_WEB_DOMAIN, parsed.webDomain)
-            putExtra(AutofillSaveActivity.EXTRA_PACKAGE_NAME, parsed.packageName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (!isDuplicate) {
+                    val saveIntent = Intent(this@VaultAutofillService, AutofillSaveActivity::class.java).apply {
+                        putExtra(AutofillSaveActivity.EXTRA_USERNAME, username)
+                        putExtra(AutofillSaveActivity.EXTRA_PASSWORD, password)
+                        putExtra(AutofillSaveActivity.EXTRA_WEB_DOMAIN, parsed.webDomain)
+                        putExtra(AutofillSaveActivity.EXTRA_PACKAGE_NAME, parsed.packageName)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(saveIntent)
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Autofill save handling failed")
+            } finally {
+                // Always answer — an unanswered SaveCallback leaves the system waiting.
+                callback.onSuccess()
+            }
         }
-        startActivity(saveIntent)
-        callback.onSuccess()
     }
 
     private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> {

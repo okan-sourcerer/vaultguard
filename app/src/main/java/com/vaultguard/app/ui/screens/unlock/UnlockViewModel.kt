@@ -4,6 +4,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.security.BiometricAuthManager
+import com.vaultguard.app.domain.usecase.UnlockVaultUseCase
 import com.vaultguard.app.security.MasterPasswordManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -26,7 +27,8 @@ data class UnlockUiState(
 @HiltViewModel
 class UnlockViewModel @Inject constructor(
     private val masterPasswordManager: MasterPasswordManager,
-    private val biometricAuthManager: BiometricAuthManager
+    private val biometricAuthManager: BiometricAuthManager,
+    private val unlockVaultUseCase: UnlockVaultUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UnlockUiState())
@@ -52,19 +54,31 @@ class UnlockViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = state.copy(isLoading = true, error = null)
-            val success = masterPasswordManager.unlock(state.password.toCharArray())
-            if (success) {
-                _uiState.value = _uiState.value.copy(isLoading = false, isUnlocked = true)
-            } else {
-                val attempts = state.failedAttempts + 1
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = "Incorrect master password",
-                    failedAttempts = attempts,
-                    password = ""
-                )
-                if (attempts >= 3) {
-                    startLockout(attempts)
+
+            when (val result = unlockVaultUseCase(state.password.toCharArray())) {
+                UnlockVaultUseCase.Result.Success ->
+                    _uiState.value = _uiState.value.copy(isLoading = false, isUnlocked = true)
+
+                // The password is right but belongs to the other side of an interrupted
+                // change, so this is not a failed attempt and must not count toward lockout.
+                is UnlockVaultUseCase.Result.NeedsOtherPassword ->
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = result.message,
+                        password = ""
+                    )
+
+                UnlockVaultUseCase.Result.WrongPassword -> {
+                    val attempts = state.failedAttempts + 1
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = "Incorrect master password",
+                        failedAttempts = attempts,
+                        password = ""
+                    )
+                    if (attempts >= 3) {
+                        startLockout(attempts)
+                    }
                 }
             }
         }

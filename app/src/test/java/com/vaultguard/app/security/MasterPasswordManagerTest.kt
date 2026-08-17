@@ -7,6 +7,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import javax.crypto.spec.SecretKeySpec
 
@@ -25,19 +27,27 @@ class MasterPasswordManagerTest {
 
     private fun manager(existing: Map<String, String> = emptyMap()): MasterPasswordManager {
         prefs = FakeSecurePrefs(existing)
-        return MasterPasswordManager(prefs, crypto, keyDerivation)
+        return MasterPasswordManager(prefs, crypto, keyDerivation, UnconfinedTestDispatcher())
     }
 
-    private fun setUpVault(password: String = "master-password-1"): MasterPasswordManager {
+    private suspend fun setUpVault(password: String = "master-password-1"): MasterPasswordManager {
         val manager = manager()
         manager.setup(password.toCharArray())
         return manager
     }
 
+    /** Runs a full two-phase change the way ChangeMasterPasswordUseCase does. */
+    private suspend fun MasterPasswordManager.changePassword(newPassword: String) {
+        val (key, pending) = prepareChange(newPassword.toCharArray())
+        beginChange(pending)
+        commitChange()
+        adoptProvenKey(key)
+    }
+
     // -- Setup and unlock ------------------------------------------------------------
 
     @Test
-    fun `setup stores salt and verification data and leaves the vault unlocked`() {
+    fun `setup stores salt and verification data and leaves the vault unlocked`() = runTest {
         val manager = setUpVault()
 
         assertTrue(manager.isSetupComplete)
@@ -47,7 +57,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `setup zeroes the caller's password`() {
+    fun `setup zeroes the caller's password`() = runTest {
         val password = "master-password-1".toCharArray()
 
         manager().setup(password)
@@ -56,7 +66,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlock succeeds with the correct password`() {
+    fun `unlock succeeds with the correct password`() = runTest {
         val manager = setUpVault("correct-password")
         manager.lockVault()
 
@@ -65,7 +75,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlock fails with the wrong password and leaves the vault locked`() {
+    fun `unlock fails with the wrong password and leaves the vault locked`() = runTest {
         val manager = setUpVault("correct-password")
         manager.lockVault()
 
@@ -74,7 +84,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `a failed unlock does not disturb an already unlocked session`() {
+    fun `a failed unlock does not disturb an already unlocked session`() = runTest {
         val manager = setUpVault("correct-password")
         val sessionKey = manager.getSessionKey()
 
@@ -85,14 +95,14 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlock against an unconfigured vault fails without throwing`() {
+    fun `unlock against an unconfigured vault fails without throwing`() = runTest {
         val manager = manager()
 
         assertFalse(manager.unlock("anything".toCharArray()))
     }
 
     @Test
-    fun `getSessionKey throws while locked`() {
+    fun `getSessionKey throws while locked`() = runTest {
         val manager = setUpVault()
         manager.lockVault()
 
@@ -102,7 +112,7 @@ class MasterPasswordManagerTest {
     // -- unlockWithKey — finding #7 ---------------------------------------------------
 
     @Test
-    fun `unlockWithKey accepts a key that opens the verification blob`() {
+    fun `unlockWithKey accepts a key that opens the verification blob`() = runTest {
         val manager = setUpVault("master-password-1")
         val goodKey = manager.getSessionKey()
         manager.lockVault()
@@ -112,7 +122,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlockWithKey rejects an unrelated key`() {
+    fun `unlockWithKey rejects an unrelated key`() = runTest {
         // The regression test for #7. This used to assign the key unconditionally, so the
         // vault "unlocked" and then failed to decrypt every row — presenting as empty.
         val manager = setUpVault("master-password-1")
@@ -125,13 +135,13 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `unlockWithKey rejects the key derived from the previous master password`() {
+    fun `unlockWithKey rejects the key derived from the previous master password`() = runTest {
         // The realistic path into #7: a master-password change leaves the biometric
         // wrapper holding the old key (finding #6).
         val manager = setUpVault("old-password")
         val oldKey = manager.getSessionKey()
 
-        assertTrue(manager.updateMasterPassword("old-password".toCharArray(), "new-password".toCharArray()))
+        manager.changePassword("new-password")
         manager.lockVault()
 
         assertFalse(manager.unlockWithKey(oldKey))
@@ -139,7 +149,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `a rejected key leaves an existing session untouched`() {
+    fun `a rejected key leaves an existing session untouched`() = runTest {
         val manager = setUpVault("master-password-1")
         val goodKey = manager.getSessionKey()
 
@@ -150,7 +160,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `verifyKey does not change session state`() {
+    fun `verifyKey does not change session state`() = runTest {
         val manager = setUpVault("master-password-1")
         val key = manager.getSessionKey()
         manager.lockVault()
@@ -160,18 +170,18 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `verifyKey returns false when the vault is not set up`() {
+    fun `verifyKey returns false when the vault is not set up`() = runTest {
         assertFalse(manager().verifyKey(SecretKeySpec(ByteArray(32), "AES")))
     }
 
     // -- Changing the master password -------------------------------------------------
 
     @Test
-    fun `updateMasterPassword rotates salt and verification and adopts the new key`() {
+    fun `a committed change rotates salt and verification`() = runTest {
         val manager = setUpVault("old-password")
         val oldSalt = manager.getSalt()
 
-        assertTrue(manager.updateMasterPassword("old-password".toCharArray(), "new-password".toCharArray()))
+        manager.changePassword("new-password")
 
         assertFalse(oldSalt.contentEquals(manager.getSalt()))
         manager.lockVault()
@@ -181,21 +191,64 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `updateMasterPassword refuses a wrong current password and changes nothing`() {
+    fun `an aborted change leaves the current password in force`() = runTest {
         val manager = setUpVault("old-password")
         val saltBefore = manager.getSalt()
 
-        assertFalse(manager.updateMasterPassword("not-the-password".toCharArray(), "new".toCharArray()))
+        val (_, pending) = manager.prepareChange("new-password".toCharArray())
+        manager.beginChange(pending)
+        manager.abortChange()
 
+        assertNull(manager.pendingChange)
         assertArrayEquals(saltBefore, manager.getSalt())
         manager.lockVault()
         assertTrue(manager.unlock("old-password".toCharArray()))
+        manager.lockVault()
+        assertFalse(manager.unlock("new-password".toCharArray()))
+    }
+
+    @Test
+    fun `beginChange records pending material without disturbing the current password`() = runTest {
+        val manager = setUpVault("old-password")
+        val saltBefore = manager.getSalt()
+
+        val (_, pending) = manager.prepareChange("new-password".toCharArray())
+        manager.beginChange(pending)
+
+        assertEquals(pending, manager.pendingChange)
+        assertArrayEquals("current salt must not move until commit", saltBefore, manager.getSalt())
+        manager.lockVault()
+        assertTrue("old password still opens the vault", manager.unlock("old-password".toCharArray()))
+    }
+
+    @Test
+    fun `commitChange promotes pending material and clears it`() = runTest {
+        val manager = setUpVault("old-password")
+
+        val (_, pending) = manager.prepareChange("new-password".toCharArray())
+        manager.beginChange(pending)
+        manager.commitChange()
+
+        assertNull(manager.pendingChange)
+        assertArrayEquals(pending.salt, manager.getSalt())
+        manager.lockVault()
+        assertTrue(manager.unlock("new-password".toCharArray()))
+    }
+
+    @Test
+    fun `commitChange with nothing pending is a no-op`() = runTest {
+        val manager = setUpVault("old-password")
+        val saltBefore = manager.getSalt()
+
+        manager.commitChange()
+
+        assertArrayEquals(saltBefore, manager.getSalt())
     }
 
     // -- Database passphrase -----------------------------------------------------------
 
     @Test
-    fun `database passphrase is generated once and then reused`() {
+    fun `database passphrase is generated once and then reused`() = runTest {
         val manager = manager()
 
         val first = manager.getDatabasePassphrase()
@@ -206,13 +259,13 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `database passphrase survives a master password change`() {
+    fun `database passphrase survives a master password change`() = runTest {
         // The SQLCipher key is independent of the master password. If a change rotated it,
         // the database would stop opening — see docs/SECURITY.md.
         val manager = setUpVault("old-password")
         val passphrase = manager.getDatabasePassphrase()
 
-        manager.updateMasterPassword("old-password".toCharArray(), "new-password".toCharArray())
+        manager.changePassword("new-password")
 
         assertArrayEquals(passphrase, manager.getDatabasePassphrase())
     }
@@ -220,7 +273,7 @@ class MasterPasswordManagerTest {
     // -- Storage compatibility ----------------------------------------------------------
 
     @Test
-    fun `persisted keys keep their names`() {
+    fun `persisted keys keep their names`() = runTest {
         // Renaming any of these silently orphans an existing vault.
         val manager = setUpVault()
         manager.getDatabasePassphrase()
@@ -232,12 +285,12 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `preferences file name is unchanged`() {
+    fun `preferences file name is unchanged`() = runTest {
         assertEquals("vault_secure_prefs", MasterPasswordManager.PREFS_NAME)
     }
 
     @Test
-    fun `stored values are standard padded base64`() {
+    fun `stored values are standard padded base64`() = runTest {
         // The class moved from android.util.Base64 NO_WRAP to java.util.Base64. They agree
         // on the standard alphabet with padding and no line breaks; this pins that so
         // values written by earlier builds stay readable.
@@ -252,7 +305,7 @@ class MasterPasswordManagerTest {
     // -- Lock signalling -----------------------------------------------------------------
 
     @Test
-    fun `lockVault clears the key and raises a one-shot event`() {
+    fun `lockVault clears the key and raises a one-shot event`() = runTest {
         val manager = setUpVault()
 
         manager.lockVault("timed out")
@@ -269,7 +322,7 @@ class MasterPasswordManagerTest {
     }
 
     @Test
-    fun `adoptRemoteSetup replaces salt and verification`() {
+    fun `adoptRemoteSetup replaces salt and verification`() = runTest {
         val manager = setUpVault("local-password")
         val remote = manager()
         remote.setup("remote-password".toCharArray())

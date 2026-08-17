@@ -18,6 +18,17 @@ interface CredentialDao {
     @Upsert
     suspend fun upsert(credential: CredentialEntity)
 
+    /**
+     * Writes many rows in one transaction. Room wraps collection-valued DAO methods in a
+     * transaction, so this is all-or-nothing.
+     *
+     * Used by the master-password change: re-encrypting row by row left the vault split
+     * across two keys when a sweep failed part-way, with no key that opened all of it
+     * (finding #5).
+     */
+    @Upsert
+    suspend fun upsertAll(credentials: List<CredentialEntity>)
+
     @Query("UPDATE credentials SET isDeleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: String, now: Long = System.currentTimeMillis())
 

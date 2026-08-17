@@ -14,10 +14,15 @@ import com.vaultguard.app.security.FakeSecurePrefs
 import com.vaultguard.app.security.KeyDerivation
 import com.vaultguard.app.security.MasterPasswordManager
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -33,6 +38,7 @@ class ChangeMasterPasswordUseCaseTest {
     private val keyDerivation = KeyDerivation()
     private val dao = mockk<CredentialDao>()
     private val syncService = mockk<FirebaseSyncService>(relaxed = true)
+    private val dispatcher = UnconfinedTestDispatcher()
 
     private lateinit var masterPasswordManager: MasterPasswordManager
     private lateinit var biometricKeystore: FakeBiometricKeystore
@@ -41,8 +47,8 @@ class ChangeMasterPasswordUseCaseTest {
     private lateinit var stored: MutableList<CredentialEntity>
 
     @Before
-    fun setUp() {
-        masterPasswordManager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation)
+    fun setUp() = runBlocking {
+        masterPasswordManager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation, dispatcher)
         masterPasswordManager.setup("old-password".toCharArray())
 
         biometricKeystore = FakeBiometricKeystore()
@@ -57,10 +63,20 @@ class ChangeMasterPasswordUseCaseTest {
             stored.removeAll { it.id == entity.id }
             stored += entity
         }
+        // Room runs collection-valued DAO methods in one transaction; the fake mirrors
+        // that by applying the whole list or none of it.
+        coEvery { dao.upsertAll(any()) } answers {
+            val entities = firstArg<List<CredentialEntity>>()
+            entities.forEach { entity ->
+                stored.removeAll { it.id == entity.id }
+                stored += entity
+            }
+        }
 
         useCase = ChangeMasterPasswordUseCase(
-            dao, crypto, masterPasswordManager, biometricAuthManager, syncService
+            dao, crypto, masterPasswordManager, biometricAuthManager, syncService, dispatcher
         )
+        Unit
     }
 
     private fun givenCredentials(count: Int) {
@@ -184,5 +200,91 @@ class ChangeMasterPasswordUseCaseTest {
 
         assertTrue("sync is best-effort and must not block a local change", result.succeeded)
         assertEquals(1, decryptAllWithSessionKey().size)
+    }
+
+    // -- Finding #5: atomicity ------------------------------------------------------------
+
+    @Test
+    fun `a failure writing rows leaves the vault fully readable with the old password`() = runTest {
+        givenCredentials(4)
+        val before = stored.map { it.id to it.encryptedPayload.toList() }.toMap()
+        coEvery { dao.upsertAll(any()) } throws IllegalStateException("disk full")
+
+        val result = useCase("old-password".toCharArray(), "new-password".toCharArray())
+
+        assertFalse(result.succeeded)
+        // Salt untouched, so the old password still derives the key the rows are under.
+        masterPasswordManager.lockVault()
+        assertTrue(masterPasswordManager.unlock("old-password".toCharArray()))
+        assertEquals(4, decryptAllWithSessionKey().size)
+        assertEquals(before, stored.map { it.id to it.encryptedPayload.toList() }.toMap())
+    }
+
+    @Test
+    fun `a failure writing rows clears the pending marker`() = runTest {
+        givenCredentials(2)
+        coEvery { dao.upsertAll(any()) } throws IllegalStateException("disk full")
+
+        useCase("old-password".toCharArray(), "new-password".toCharArray())
+
+        assertNull("a resolved failure must not leave recovery state behind",
+            masterPasswordManager.pendingChange)
+    }
+
+    @Test
+    fun `an unreadable row aborts the change instead of stranding it`() = runTest {
+        // Re-encrypting the readable rows would move them to the new key and leave this
+        // one behind forever. Better to change nothing.
+        givenCredentials(3)
+        stored[1] = stored[1].copy(
+            encryptedPayload = stored[1].encryptedPayload.copyOf().also { it[0]++ }
+        )
+
+        val result = useCase("old-password".toCharArray(), "new-password".toCharArray())
+
+        assertFalse(result.succeeded)
+        assertNotNull(result.failureReason)
+        masterPasswordManager.lockVault()
+        assertTrue(masterPasswordManager.unlock("old-password".toCharArray()))
+        assertNull(masterPasswordManager.pendingChange)
+    }
+
+    @Test
+    fun `rows are written in a single call, not one at a time`() = runTest {
+        // Row-by-row writes are what allowed a partial sweep to split the vault across
+        // two keys in the first place.
+        givenCredentials(5)
+
+        useCase("old-password".toCharArray(), "new-password".toCharArray())
+
+        coVerify(exactly = 1) { dao.upsertAll(any()) }
+        coVerify(exactly = 0) { dao.upsert(any()) }
+    }
+
+    @Test
+    fun `a successful change leaves no pending marker`() = runTest {
+        givenCredentials(3)
+
+        useCase("old-password".toCharArray(), "new-password".toCharArray())
+
+        assertNull(masterPasswordManager.pendingChange)
+    }
+
+    @Test
+    fun `key derivation does not run on the calling thread`() = runTest {
+        // Argon2id blocks for hundreds of milliseconds; on the main thread that is an ANR
+        // (finding #17). The dispatcher is injected so this can be asserted.
+        givenCredentials(1)
+        var used = false
+        val recording = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+                used = true
+                block.run()
+            }
+        }
+        val manager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation, recording)
+        manager.setup("old-password".toCharArray())
+
+        assertTrue("derivation must be dispatched, not run inline", used)
     }
 }

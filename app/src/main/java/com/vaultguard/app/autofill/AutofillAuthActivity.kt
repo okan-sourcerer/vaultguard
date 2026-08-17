@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,12 +36,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.vaultguard.app.R
 import com.vaultguard.app.domain.model.Credential
+import com.vaultguard.app.domain.usecase.UnlockVaultUseCase
 import com.vaultguard.app.security.CryptoManager
 import com.vaultguard.app.security.EncryptedData
 import com.vaultguard.app.security.MasterPasswordManager
 import com.vaultguard.app.data.local.db.dao.CredentialDao
 import com.vaultguard.app.ui.theme.VaultGuardTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import javax.inject.Inject
 
@@ -57,6 +60,7 @@ class AutofillAuthActivity : ComponentActivity() {
     @Inject lateinit var masterPasswordManager: MasterPasswordManager
     @Inject lateinit var cryptoManager: CryptoManager
     @Inject lateinit var credentialDao: CredentialDao
+    @Inject lateinit var unlockVaultUseCase: UnlockVaultUseCase
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +75,19 @@ class AutofillAuthActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var password by remember { mutableStateOf("") }
                     var error by remember { mutableStateOf<String?>(null) }
+                    var isBusy by remember { mutableStateOf(false) }
+                    val scope = rememberCoroutineScope()
+
+                    // Argon2id blocks for hundreds of milliseconds; running it in the
+                    // click handler froze the autofill window (finding #17).
+                    fun submit() {
+                        if (isBusy || password.isEmpty()) return
+                        isBusy = true
+                        scope.launch {
+                            error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
+                            isBusy = false
+                        }
+                    }
 
                     Column(
                         modifier = Modifier
@@ -93,9 +110,8 @@ class AutofillAuthActivity : ComponentActivity() {
                                 imeAction = ImeAction.Done,
                                 autoCorrectEnabled = false
                             ),
-                            keyboardActions = KeyboardActions(onDone = {
-                                error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
-                            }),
+                            enabled = !isBusy,
+                            keyboardActions = KeyboardActions(onDone = { submit() }),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -107,13 +123,11 @@ class AutofillAuthActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Button(
-                            onClick = {
-                                error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
-                            },
-                            enabled = password.isNotEmpty(),
+                            onClick = { submit() },
+                            enabled = !isBusy && password.isNotEmpty(),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Unlock & Fill")
+                            Text(if (isBusy) "Unlocking…" else "Unlock & Fill")
                         }
                     }
                 }
@@ -127,7 +141,7 @@ class AutofillAuthActivity : ComponentActivity() {
      * The screen already rendered an `error` slot but nothing ever assigned to it, so a
      * wrong master password made the button appear inert (finding #31).
      */
-    private fun tryUnlock(
+    private suspend fun tryUnlock(
         password: String,
         webDomain: String?,
         appPackage: String?,
@@ -136,9 +150,10 @@ class AutofillAuthActivity : ComponentActivity() {
     ): String? {
         if (password.isEmpty()) return "Enter your master password"
 
-        val success = masterPasswordManager.unlock(password.toCharArray())
-        if (!success) {
-            return "Incorrect master password"
+        when (val result = unlockVaultUseCase(password.toCharArray())) {
+            UnlockVaultUseCase.Result.Success -> Unit
+            is UnlockVaultUseCase.Result.NeedsOtherPassword -> return result.message
+            UnlockVaultUseCase.Result.WrongPassword -> return "Incorrect master password"
         }
 
         val credentials = findMatchingCredentials(webDomain, appPackage)

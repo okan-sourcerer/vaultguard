@@ -13,7 +13,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | **fixed** (chunk 2) |
 | 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | open |
 | 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open |
-| 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | open |
+| 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | **fixed** (chunk 5) |
 | 6 | Password change leaves biometric wrapping the old key | `usecase/ChangeMasterPasswordUseCase.kt` | **fixed** (chunk 4) |
 | 7 | `unlockWithKey` never validates the key | `security/MasterPasswordManager.kt:96-98` | **fixed** (chunk 3) |
 | 8 | Cancelling biometric enrolment permanently breaks biometric unlock | `security/BiometricAuthManager.kt:49-89` | **fixed** (chunk 4) |
@@ -59,8 +59,8 @@ reports true.
 | 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | open |
 | 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | open |
 | 16 | Sign-out claims sync disabled, re-enables it anonymously | `security/GoogleAuthManager.kt:97-101` | open |
-| 17 | Argon2 runs on the main thread | `SetupViewModel.kt:70`, `UnlockViewModel.kt:55`, `AutofillAuthActivity.kt:128` | open |
-| 18 | `onSaveRequest` does `runBlocking` on the main thread | `autofill/VaultAutofillService.kt:151` | open |
+| 17 | Argon2 runs on the main thread | `SetupViewModel.kt:70`, `UnlockViewModel.kt:55`, `AutofillAuthActivity.kt:128` | **fixed** (chunk 5) |
+| 18 | `onSaveRequest` does `runBlocking` on the main thread | `autofill/VaultAutofillService.kt:151` | **fixed** (chunk 5) |
 
 **#9** — `TYPE_TEXT_VARIATION_*` are values inside `TYPE_MASK_VARIATION`, not independent
 bits, so `and … != 0` is wrong. An email field (`0x21`) `and TYPE_TEXT_VARIATION_WEB_PASSWORD`

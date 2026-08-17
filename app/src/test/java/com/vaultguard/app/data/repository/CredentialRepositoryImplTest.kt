@@ -12,7 +12,9 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,13 +35,14 @@ class CredentialRepositoryImplTest {
     private val crypto = CryptoManager()
     private val keyDerivation = KeyDerivation()
     private val dao = mockk<CredentialDao>()
+    private val dispatcher = UnconfinedTestDispatcher()
 
     private lateinit var masterPasswordManager: MasterPasswordManager
     private lateinit var repository: CredentialRepositoryImpl
 
     @Before
-    fun setUp() {
-        masterPasswordManager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation)
+    fun setUp() = runBlocking {
+        masterPasswordManager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation, dispatcher)
         masterPasswordManager.setup("master-password".toCharArray())
         repository = CredentialRepositoryImpl(dao, crypto, masterPasswordManager)
     }
