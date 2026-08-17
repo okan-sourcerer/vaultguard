@@ -245,7 +245,7 @@ fun SettingsScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Auto-lock timeout", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "${uiState.autoLockTimeout} minutes",
+                        minutesLabel(uiState.autoLockTimeout),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -253,7 +253,7 @@ fun SettingsScreen(
                 DropdownMenu(expanded = timeoutExpanded, onDismissRequest = { timeoutExpanded = false }) {
                     timeoutOptions.forEach { minutes ->
                         DropdownMenuItem(
-                            text = { Text("$minutes minutes") },
+                            text = { Text(minutesLabel(minutes)) },
                             onClick = {
                                 viewModel.onAutoLockTimeoutChange(minutes)
                                 timeoutExpanded = false
@@ -607,6 +607,10 @@ fun SettingsScreen(
         }
     }
 }
+
+/** "1 minute", not "1 minutes" (finding #63). */
+private fun minutesLabel(minutes: Int) =
+    if (minutes == 1) "1 minute" else "$minutes minutes"
 
 @Suppress("AssignedValueIsNeverRead")
 @Composable

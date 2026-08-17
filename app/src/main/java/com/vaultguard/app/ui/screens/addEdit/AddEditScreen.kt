@@ -33,6 +33,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,12 +74,46 @@ fun AddEditScreen(
         if (uiState.isSaved) onNavigateBack()
     }
 
+    // Leaving used to discard everything typed without a word, on the one screen where what
+    // was typed may be a password that exists nowhere else yet (finding #60).
+    var showDiscardConfirm by remember { mutableStateOf(false) }
+    fun attemptBack() {
+        if (viewModel.hasUnsavedChanges) showDiscardConfirm = true else onNavigateBack()
+    }
+
+    BackHandler(enabled = true) { attemptBack() }
+
+    if (showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirm = false },
+            title = { Text("Discard changes?") },
+            text = {
+                Text(
+                    if (uiState.isEditing) {
+                        "Your edits to this entry have not been saved."
+                    } else {
+                        "This entry has not been saved. The password will not be kept."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardConfirm = false
+                    onNavigateBack()
+                }) { Text("Discard") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardConfirm = false }) { Text("Keep editing") }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (uiState.isEditing) "Edit Credential" else "Add Credential") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = { attemptBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }

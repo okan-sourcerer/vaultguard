@@ -59,6 +59,33 @@ fun PasswordGeneratorScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // The delete control sits inside the row that selects a preset, so the tap that picks
+    // one and the tap that destroys one are next to each other. Deleting is not undoable,
+    // so it asks first (finding #62).
+    var presetPendingDelete by remember { mutableStateOf<String?>(null) }
+    presetPendingDelete?.let { presetId ->
+        val preset = uiState.presets.find { it.id == presetId }
+        AlertDialog(
+            onDismissRequest = { presetPendingDelete = null },
+            title = { Text("Delete this preset?") },
+            text = {
+                Text(
+                    "“${preset?.name ?: "This preset"}” will be removed. Passwords you " +
+                        "already generated with it are unaffected."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.onDeletePreset(presetId)
+                    presetPendingDelete = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { presetPendingDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     // Save preset dialog
     if (uiState.showSaveDialog) {
         AlertDialog(
@@ -145,7 +172,7 @@ fun PasswordGeneratorScreen(
                                         if (!preset.isDefault) {
                                             IconButton(
                                                 onClick = {
-                                                    viewModel.onDeletePreset(preset.id)
+                                                    presetPendingDelete = preset.id
                                                     presetExpanded = false
                                                 }
                                             ) {

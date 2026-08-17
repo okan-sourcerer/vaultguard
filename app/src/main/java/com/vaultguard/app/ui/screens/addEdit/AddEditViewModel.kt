@@ -31,6 +31,13 @@ data class AddEditUiState(
     val tags: String = "",
     val isPinned: Boolean = false,
     val createdAt: Long = 0L,
+    /**
+     * Carried, not edited. The form has no field for these, and rebuilding the credential
+     * without them erased the two signals `CredentialMatcher` ranks highest, so editing an
+     * autofill-captured entry stopped autofill offering it (finding #61).
+     */
+    val linkedPackages: List<String> = emptyList(),
+    val linkedDomains: List<String> = emptyList(),
     val strength: PasswordStrength = PasswordStrength(0, StrengthLevel.WEAK, 0.0),
     val presets: List<PasswordPreset> = emptyList(),
     val selectedPresetId: String = PasswordPreset.DEFAULT_ID,
@@ -55,6 +62,33 @@ class AddEditViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AddEditUiState())
     val uiState: StateFlow<AddEditUiState> = _uiState
+
+    /**
+     * The editable fields as they stood when the screen opened, for detecting unsaved work
+     * (finding #60). Only the fields a user can type into: comparing whole UI states would
+     * count a recomputed strength score or a loaded preset list as an edit.
+     */
+    private data class FormSnapshot(
+        val siteName: String,
+        val appName: String,
+        val url: String,
+        val username: String,
+        val password: String,
+        val notes: String,
+        val category: String,
+        val tags: String,
+        val isPinned: Boolean
+    )
+
+    private fun AddEditUiState.snapshot() = FormSnapshot(
+        siteName, appName, url, username, password, notes, category, tags, isPinned
+    )
+
+    private var pristine: FormSnapshot = AddEditUiState().snapshot()
+
+    /** False once saved — the screen is leaving on purpose at that point. */
+    val hasUnsavedChanges: Boolean
+        get() = !_uiState.value.isSaved && _uiState.value.snapshot() != pristine
 
     init {
         loadPresets()
@@ -87,11 +121,14 @@ class AddEditViewModel @Inject constructor(
                             tags = credential.tags.joinToString(", "),
                             isPinned = credential.isPinned,
                             createdAt = credential.createdAt,
+                            linkedPackages = credential.linkedPackages,
+                            linkedDomains = credential.linkedDomains,
                             strength = strengthEvaluator(credential.password),
                             presets = _uiState.value.presets,
                             isEditing = true,
                             isLoading = false
                         )
+                        pristine = _uiState.value.snapshot()
                     }
                     // Every branch below must clear isLoading. The previous code only
                     // handled the found case, so a missing row left the screen spinning
@@ -176,6 +213,8 @@ class AddEditViewModel @Inject constructor(
                     category = state.category.trim(),
                     tags = state.tags.split(",").map { it.trim() }.filter { it.isNotEmpty() },
                     isPinned = state.isPinned,
+                    linkedPackages = state.linkedPackages,
+                    linkedDomains = state.linkedDomains,
                     createdAt = if (state.isEditing) state.createdAt else System.currentTimeMillis()
                 )
                 credentialRepository.save(credential)
