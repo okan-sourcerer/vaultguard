@@ -170,6 +170,10 @@ class AutofillAuthActivity : ComponentActivity() {
             UnlockVaultUseCase.Result.Success -> Unit
             is UnlockVaultUseCase.Result.VaultUnreadable -> return result.detail
             UnlockVaultUseCase.Result.WrongPassword -> return "Incorrect master password"
+            // Inherited from the shared use case. This path had no throttle of its own, so
+            // it was the cheapest place to guess from (finding #12).
+            is UnlockVaultUseCase.Result.Throttled ->
+                return "Too many incorrect attempts. Try again in ${result.remainingSeconds}s."
         }
 
         val credentials = withContext(Dispatchers.IO) {

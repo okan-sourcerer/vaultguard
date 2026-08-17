@@ -9,6 +9,7 @@ import com.vaultguard.app.security.EncryptedData
 import com.vaultguard.app.security.FakeSecurePrefs
 import com.vaultguard.app.security.KeyDerivation
 import com.vaultguard.app.security.MasterPasswordManager
+import com.vaultguard.app.security.UnlockThrottle
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -38,6 +39,7 @@ class UnlockVaultUseCaseTest {
 
     private lateinit var prefs: FakeSecurePrefs
     private lateinit var manager: MasterPasswordManager
+    private lateinit var throttle: UnlockThrottle
     private lateinit var useCase: UnlockVaultUseCase
     private lateinit var stored: MutableList<CredentialEntity>
 
@@ -53,7 +55,8 @@ class UnlockVaultUseCaseTest {
                 stored += entity
             }
         }
-        useCase = UnlockVaultUseCase(manager, dao, crypto, dispatcher)
+        throttle = UnlockThrottle(prefs)
+        useCase = UnlockVaultUseCase(manager, dao, crypto, throttle, dispatcher)
         Unit
     }
 
@@ -264,4 +267,53 @@ class UnlockVaultUseCaseTest {
         } catch (_: Exception) {
             false
         }
+
+    // -- Throttling — finding #12 ------------------------------------------------------------
+
+    @Test
+    fun `repeated wrong passwords eventually lock the attempt out`() = runTest {
+        givenModernVault()
+
+        assertEquals(UnlockVaultUseCase.Result.WrongPassword, useCase("nope".toCharArray()))
+        assertEquals(UnlockVaultUseCase.Result.WrongPassword, useCase("nope".toCharArray()))
+
+        val third = useCase("nope".toCharArray())
+        assertTrue(third is UnlockVaultUseCase.Result.Throttled)
+        assertEquals(3, (third as UnlockVaultUseCase.Result.Throttled).failedAttempts)
+    }
+
+    @Test
+    fun `a throttled attempt is refused even with the correct password`() = runTest {
+        givenModernVault()
+        repeat(3) { useCase("nope".toCharArray()) }
+
+        val result = useCase("master-password".toCharArray())
+
+        assertTrue(result is UnlockVaultUseCase.Result.Throttled)
+        assertFalse(manager.isVaultUnlocked)
+    }
+
+    @Test
+    fun `a successful unlock clears the throttle`() = runTest {
+        givenModernVault()
+        repeat(2) { useCase("nope".toCharArray()) }
+
+        assertEquals(UnlockVaultUseCase.Result.Success, useCase("master-password".toCharArray()))
+
+        assertEquals(0, throttle.failedAttempts)
+    }
+
+    @Test
+    fun `an unreadable vault is not counted as a wrong password`() = runTest {
+        // The password was right; penalising it would lock the user out of their own
+        // recovery attempts.
+        givenModernVault()
+        val stranger = manager.generateVaultKey()
+        stored.clear()
+        rowsUnder(stranger, 2)
+
+        useCase("master-password".toCharArray())
+
+        assertEquals(0, throttle.failedAttempts)
+    }
 }

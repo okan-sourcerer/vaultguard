@@ -6,6 +6,7 @@ import com.vaultguard.app.di.CryptoDispatcher
 import com.vaultguard.app.security.CryptoManager
 import com.vaultguard.app.security.EncryptedData
 import com.vaultguard.app.security.MasterPasswordManager
+import com.vaultguard.app.security.UnlockThrottle
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -26,6 +27,7 @@ class UnlockVaultUseCase @Inject constructor(
     private val masterPasswordManager: MasterPasswordManager,
     private val credentialDao: CredentialDao,
     private val cryptoManager: CryptoManager,
+    private val throttle: UnlockThrottle,
     @CryptoDispatcher private val cryptoDispatcher: CoroutineDispatcher
 ) {
 
@@ -35,11 +37,22 @@ class UnlockVaultUseCase @Inject constructor(
 
         /** The password is right but the rows open with neither key — real damage. */
         data class VaultUnreadable(val detail: String) : Result
+
+        /** Too many recent failures. Throttling covers every unlock path (finding #12). */
+        data class Throttled(val remainingSeconds: Int, val failedAttempts: Int) : Result
     }
 
     suspend operator fun invoke(password: CharArray): Result {
-        val masterKey = masterPasswordManager.deriveMasterKey(password) ?: return Result.WrongPassword
-        if (!masterPasswordManager.verifyMasterKey(masterKey)) return Result.WrongPassword
+        // Checked before deriving: an attempt refused by the throttle should not cost the
+        // user hundreds of milliseconds of Argon2, and should not look like a slow reject.
+        (throttle.state() as? UnlockThrottle.State.LockedOut)?.let { lockedOut ->
+            password.fill(' ')
+            return Result.Throttled(lockedOut.remainingSeconds, lockedOut.failedAttempts)
+        }
+
+        val masterKey = masterPasswordManager.deriveMasterKey(password) ?: return failed()
+        if (!masterPasswordManager.verifyMasterKey(masterKey)) return failed()
+        throttle.recordSuccess()
 
         val storedVaultKey = masterPasswordManager.unwrapVaultKey(masterKey)
         val probe = credentialDao.getAll().firstOrNull { !it.isDeleted }
@@ -131,6 +144,17 @@ class UnlockVaultUseCase @Inject constructor(
             Result.Success
         }
     }
+
+    /**
+     * Records a wrong password and reports whether that failure started a lockout, so the
+     * user learns the wait immediately rather than on the next attempt.
+     */
+    private fun failed(): Result =
+        when (val state = throttle.recordFailure()) {
+            is UnlockThrottle.State.LockedOut ->
+                Result.Throttled(state.remainingSeconds, state.failedAttempts)
+            UnlockThrottle.State.Allowed -> Result.WrongPassword
+        }
 
     private fun opens(key: SecretKey, entity: CredentialEntity): Boolean =
         try {

@@ -178,8 +178,10 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
   a11y privileges from reading typed input.
 - **A forgotten master password.** There is no recovery mechanism, no escrow, no hint.
   This is intentional but is currently *undisclosed to the user* (#39).
-- **Online brute force of the unlock screen.** The current backoff caps at 32 seconds and
-  resets on process restart (#12).
+- **Online brute force by someone who can change the device clock.** `UnlockThrottle`
+  escalates to an hour and survives a restart, but the lockout is wall-clock based, so a
+  forward clock change ends the wait. The durable cost of a guess is the Argon2id
+  derivation, not the throttle.
 - **Traffic analysis of HIBP queries.** The prefix reveals a 1-in-~16 bucket of the hash.
 
 ### Known live weaknesses

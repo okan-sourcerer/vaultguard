@@ -226,6 +226,8 @@ private fun UnlockGate(
                 UnlockVaultUseCase.Result.Success -> { onUnlocked(); null }
                 is UnlockVaultUseCase.Result.VaultUnreadable -> result.detail
                 UnlockVaultUseCase.Result.WrongPassword -> "Incorrect master password"
+                is UnlockVaultUseCase.Result.Throttled ->
+                    "Too many incorrect attempts. Try again in ${result.remainingSeconds}s."
             }
             isBusy = false
         }

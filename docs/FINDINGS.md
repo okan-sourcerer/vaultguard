@@ -63,7 +63,7 @@ reports true.
 | 9 | Autofill classifies email/URI/postal fields as passwords | `autofill/StructureParser.kt:96-107` | **fixed** (chunk 8) |
 | 10 | Domain matching is suffix-based (`notgoogle.com` matches `google.com`) | `autofill/VaultAutofillService.kt:243-254` | **fixed** (chunk 8) |
 | 11 | Locked-vault autofill uses looser matching and auto-fills first match | `autofill/AutofillAuthActivity.kt:161-194` | **fixed** (chunk 8) |
-| 12 | Brute-force backoff caps at 32 s and resets on restart | `unlock/UnlockViewModel.kt:82-98` | open |
+| 12 | Brute-force backoff caps at 32 s and resets on restart | `unlock/UnlockViewModel.kt:82-98` | **fixed** (chunk 9) |
 | 13 | `FLAG_SECURE` missing on both autofill activities | `MainActivity.kt:35` only | **fixed** (chunk 8) |
 | 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | open |
 | 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | open |
@@ -86,9 +86,14 @@ match. The hint-text fallback also matches `"pass"` inside "passport" and "passe
 A hostile app declaring package `com.evil.gmail` matches a credential named "Gmail", and
 the code returns `credentials.first()` with no user selection.
 
-**#12** — `(1 shl (attempts - 3).coerceAtMost(4)) * 2` maxes at 32 seconds, and
-`failedAttempts` lives only in the ViewModel. `AutofillAuthActivity` has no rate limiting
-at all.
+**#12** — `(1 shl (attempts - 3).coerceAtMost(4)) * 2` maxed at 32 seconds, and
+`failedAttempts` lived only in the ViewModel, so killing the app reset it. `AutofillAuthActivity`
+had no rate limiting at all.
+
+Replaced by `UnlockThrottle`: persisted in the encrypted preferences, escalating to an hour,
+and applied inside `UnlockVaultUseCase` so every unlock path inherits it. It is a deterrent,
+not a boundary — the lockout is wall-clock based, so anyone able to change the device clock
+can shorten it. The real cost of a guess is Argon2id.
 
 **#14** — the catch block's own comment says "report unknown", but `BreachResult` has no
 unknown state, so it returns `isBreached = false` and the UI prints a green all-clear.
@@ -158,7 +163,7 @@ Full analysis in [SYNC.md](SYNC.md).
 | 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8) |
 | 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | **fixed** (chunk 8) |
 | 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | open |
-| 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | open |
+| 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | **fixed** (chunk 8a) |
 | 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | **fixed** (chunk 3) |
 | 39 | No "forgetting this loses everything" warning at setup | `setup/SetupScreen.kt` | open |
 | 40 | A locked or unreadable vault renders as an empty vault | `data/repository/CredentialRepositoryImpl.kt:83-96` | **fixed** (chunk 3) |

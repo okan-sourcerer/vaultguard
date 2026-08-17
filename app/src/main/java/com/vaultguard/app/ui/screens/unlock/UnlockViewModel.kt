@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.security.BiometricAuthManager
 import com.vaultguard.app.domain.usecase.UnlockVaultUseCase
 import com.vaultguard.app.security.MasterPasswordManager
+import com.vaultguard.app.security.UnlockThrottle
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,8 +30,11 @@ data class UnlockUiState(
 class UnlockViewModel @Inject constructor(
     private val masterPasswordManager: MasterPasswordManager,
     private val biometricAuthManager: BiometricAuthManager,
-    private val unlockVaultUseCase: UnlockVaultUseCase
+    private val unlockVaultUseCase: UnlockVaultUseCase,
+    private val throttle: UnlockThrottle
 ) : ViewModel() {
+
+    private var countdownJob: Job? = null
 
     private val _uiState = MutableStateFlow(UnlockUiState())
     val uiState: StateFlow<UnlockUiState> = _uiState
@@ -40,8 +45,14 @@ class UnlockViewModel @Inject constructor(
 
     init {
         _uiState.value = _uiState.value.copy(
-            biometricAvailable = biometricAuthManager.isBiometricEnabled
+            biometricAvailable = biometricAuthManager.isBiometricEnabled,
+            failedAttempts = throttle.failedAttempts
         )
+        // A lockout outlives the process now, so the screen has to pick up one already in
+        // progress rather than starting from zero (finding #12).
+        (throttle.state() as? UnlockThrottle.State.LockedOut)?.let {
+            startCountdown(it.remainingSeconds)
+        }
     }
 
     fun onPasswordChange(password: String) {
@@ -68,17 +79,22 @@ class UnlockViewModel @Inject constructor(
                         password = ""
                     )
 
-                UnlockVaultUseCase.Result.WrongPassword -> {
-                    val attempts = state.failedAttempts + 1
+                UnlockVaultUseCase.Result.WrongPassword ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         error = "Incorrect master password",
-                        failedAttempts = attempts,
+                        failedAttempts = throttle.failedAttempts,
                         password = ""
                     )
-                    if (attempts >= 3) {
-                        startLockout(attempts)
-                    }
+
+                is UnlockVaultUseCase.Result.Throttled -> {
+                    _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        error = "Too many incorrect attempts",
+                        failedAttempts = result.failedAttempts,
+                        password = ""
+                    )
+                    startCountdown(result.remainingSeconds)
                 }
             }
         }
@@ -114,18 +130,12 @@ class UnlockViewModel @Inject constructor(
         }
     }
 
-    private fun startLockout(attempts: Int) {
-        val delaySeconds = when {
-            attempts < 3 -> 0
-            else -> (1 shl (attempts - 3).coerceAtMost(4)) * 2
-        }
-        if (delaySeconds == 0) return
-
-        _uiState.value = _uiState.value.copy(isLockedOut = true, lockoutSeconds = delaySeconds)
-
-        viewModelScope.launch {
-            for (i in delaySeconds downTo 1) {
-                _uiState.value = _uiState.value.copy(lockoutSeconds = i)
+    /** Counts the lockout down for display. The throttle itself is the authority. */
+    private fun startCountdown(seconds: Int) {
+        countdownJob?.cancel()
+        countdownJob = viewModelScope.launch {
+            for (remaining in seconds downTo 1) {
+                _uiState.value = _uiState.value.copy(isLockedOut = true, lockoutSeconds = remaining)
                 delay(1000)
             }
             _uiState.value = _uiState.value.copy(isLockedOut = false, lockoutSeconds = 0)
