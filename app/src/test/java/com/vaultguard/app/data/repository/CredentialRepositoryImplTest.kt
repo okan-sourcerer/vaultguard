@@ -234,4 +234,80 @@ class CredentialRepositoryImplTest {
         assertEquals(listOf("Site good"), mapped.items)
         assertEquals(listOf("bad"), mapped.undecryptableIds)
     }
+
+    // -- Finding #29: password age vs row age ---------------------------------------------
+
+    @Test
+    fun `a new credential stamps passwordChangedAt`() = runTest {
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById(any()) } returns null
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("new"))
+
+        val saved = stored.single()
+        assertTrue(saved.passwordChangedAt > 0)
+        assertEquals(saved.updatedAt, saved.passwordChangedAt)
+    }
+
+    @Test
+    fun `editing a non-password field preserves passwordChangedAt`() = runTest {
+        // The bug: pinning an entry or fixing a typo in its notes reset the reported
+        // password age to "Today" and cleared it from the stale-password count.
+        val original = entity("a", credential("a")).copy(
+            updatedAt = 1_000, passwordChangedAt = 1_000
+        )
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        // Same password, different notes.
+        repository.save(credential("a").copy(notes = "edited", isPinned = true))
+
+        val saved = stored.single()
+        assertEquals("password did not change", 1_000L, saved.passwordChangedAt)
+        assertTrue("but the row was written", saved.updatedAt > 1_000L)
+    }
+
+    @Test
+    fun `changing the password advances passwordChangedAt`() = runTest {
+        val original = entity("a", credential("a")).copy(
+            updatedAt = 1_000, passwordChangedAt = 1_000
+        )
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("a").copy(password = "a-brand-new-password"))
+
+        val saved = stored.single()
+        assertTrue("rotation must be recorded", saved.passwordChangedAt > 1_000L)
+        assertEquals(saved.updatedAt, saved.passwordChangedAt)
+    }
+
+    @Test
+    fun `an unreadable existing row is treated as a password change`() = runTest {
+        // We cannot compare against ciphertext we cannot open, so carrying the old
+        // timestamp forward would be asserting something unverified.
+        val original = corruptEntity("a").copy(updatedAt = 1_000, passwordChangedAt = 1_000)
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("a"))
+
+        assertTrue(stored.single().passwordChangedAt > 1_000L)
+    }
+
+    @Test
+    fun `passwordChangedAt reaches the domain model`() = runTest {
+        every { dao.getAllCredentials() } returns flowOf(
+            listOf(entity("a").copy(updatedAt = 9_000, passwordChangedAt = 4_000))
+        )
+
+        val credential = repository.getAllCredentials().first().items.single()
+
+        assertEquals(4_000L, credential.passwordChangedAt)
+        assertEquals(9_000L, credential.updatedAt)
+    }
 }

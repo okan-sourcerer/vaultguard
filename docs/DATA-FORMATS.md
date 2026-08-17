@@ -5,7 +5,8 @@ changes as migrations, not edits.
 
 ## Room schema — `vault.db`
 
-Database version **1**, `exportSchema = false`, no migrations declared.
+Database version **2**, `exportSchema = true` (committed under `app/schemas`),
+migrations in `VaultMigrations`.
 
 ### Table `credentials`
 
@@ -15,7 +16,8 @@ Database version **1**, `exportSchema = false`, no migrations declared.
 | `encryptedPayload` | `BLOB` | AES-256-GCM ciphertext of the payload JSON |
 | `iv` | `BLOB` | 12-byte GCM nonce for this row |
 | `createdAt` | `INTEGER` | Epoch millis, device local clock |
-| `updatedAt` | `INTEGER` | Epoch millis, device local clock |
+| `updatedAt` | `INTEGER` | Any write to the row: edit, pin toggle, re-encryption sweep |
+| `passwordChangedAt` | `INTEGER` | When the password itself last changed. Added in v2; backfilled from `updatedAt` |
 | `syncedAt` | `INTEGER?` | Epoch millis of last successful push/pull; `NULL` = never synced |
 | `isDeleted` | `INTEGER` | Tombstone flag; rows are soft-deleted and never purged |
 
@@ -24,12 +26,10 @@ because `ByteArray` identity comparison would break list diffing.
 
 Two known problems recorded here so a migration can address them together:
 
-- **`exportSchema = false` and no migrations.** Any future schema change has no
-  validation and no upgrade path. Turn schema export on before the first migration.
-- **`updatedAt` is overloaded.** It means "row last written", but the UI reads it as
-  "password last changed" (#29). Pinning an entry or editing its notes resets it. A
-  separate `passwordChangedAt` column is needed — that is the first planned migration
-  (1 → 2).
+Both were addressed in v2: schema export is on and committed, and `passwordChangedAt`
+separates password rotation from row writes. The v2 backfill sets `passwordChangedAt`
+= `updatedAt` for pre-existing rows, which is an upper bound rather than the truth —
+the real date was never recorded, so entries may report as newer than they are.
 
 ## Credential payload JSON
 

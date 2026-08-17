@@ -51,10 +51,17 @@ android {
             all { it.testLogging { events("passed", "skipped", "failed") } }
         }
     }
+    // Lets MigrationTestHelper open the committed v1 schema on-device.
+    sourceSets.getByName("androidTest") {
+        assets.srcDir("$projectDir/schemas")
+    }
 }
 
 ksp {
     arg("dagger.fastInit", "enabled")
+    // Commit the generated schema JSON so migrations can be tested against the real
+    // historical shape rather than one reconstructed by hand.
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -116,6 +123,7 @@ dependencies {
     testImplementation(libs.json)
     testImplementation(libs.bouncycastle)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.room.testing)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

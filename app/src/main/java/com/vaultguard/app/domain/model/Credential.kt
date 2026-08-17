@@ -14,7 +14,10 @@ data class Credential(
     val linkedPackages: List<String> = emptyList(),
     val linkedDomains: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    /** Any write to this entry. */
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** When the password itself last changed — see CredentialEntity (finding #29). */
+    val passwordChangedAt: Long = System.currentTimeMillis()
 ) {
     /** Display name: prefers appName, falls back to siteName */
     val displayName: String get() = appName.ifEmpty { siteName }

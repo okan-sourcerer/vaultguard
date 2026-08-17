@@ -249,8 +249,11 @@ fun CredentialDetailScreen(
 
                 // Password age indicator
                 Spacer(modifier = Modifier.height(16.dp))
-                val passwordAgeDays = remember(credential.updatedAt) {
-                    ((System.currentTimeMillis() - credential.updatedAt) / (1000L * 60 * 60 * 24)).toInt()
+                // Reads passwordChangedAt, not updatedAt: pinning the entry or editing
+                // its notes must not reset the reported age (finding #29).
+                val passwordAgeDays = remember(credential.passwordChangedAt) {
+                    ((System.currentTimeMillis() - credential.passwordChangedAt) /
+                        (1000L * 60 * 60 * 24)).toInt().coerceAtLeast(0)
                 }
                 val passwordAgeText = when {
                     passwordAgeDays < 1 -> "Today"

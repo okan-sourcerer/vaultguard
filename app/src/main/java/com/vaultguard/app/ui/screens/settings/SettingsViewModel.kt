@@ -94,7 +94,8 @@ class SettingsViewModel @Inject constructor(
                     .filter { it.size > 1 }
                     .sumOf { it.size }
 
-                val oldPasswords = credentials.count { (now - it.updatedAt) > ninetyDaysMs }
+                // passwordChangedAt, not updatedAt — a pin toggle is not a rotation (#29).
+                val oldPasswords = credentials.count { (now - it.passwordChangedAt) > ninetyDaysMs }
 
                 val categoryCounts = credentials
                     .filter { it.category.isNotEmpty() }

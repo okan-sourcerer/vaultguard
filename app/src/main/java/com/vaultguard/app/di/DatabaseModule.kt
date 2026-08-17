@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.vaultguard.app.data.local.db.VaultDatabase
 import com.vaultguard.app.data.local.db.VaultDatabaseHealthCheck
+import com.vaultguard.app.data.local.db.VaultMigrations
 import com.vaultguard.app.data.local.db.dao.CredentialDao
 import com.vaultguard.app.security.MasterPasswordManager
 import dagger.Module
@@ -51,6 +52,7 @@ object DatabaseModule {
             VaultDatabaseHealthCheck.DATABASE_NAME
         )
             .openHelperFactory(factory)
+            .addMigrations(*VaultMigrations.ALL)
             // No destructive migration fallback: a failed migration must fail loudly
             // rather than silently recreating an empty vault.
             .build()

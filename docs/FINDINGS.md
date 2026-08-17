@@ -106,7 +106,7 @@ Full analysis in [SYNC.md](SYNC.md).
 | 26 | Two contradictory definitions of "weak password" | `settings/SettingsViewModel.kt:79-84` vs `util/PasswordStrengthEvaluator.kt` | open |
 | 27 | Strength evaluator has no dictionary check (`Password1!` → STRONG) | `util/PasswordStrengthEvaluator.kt` | open |
 | 28 | Setup and change-password enforce different rules | `SetupViewModel.kt:52-65` vs `SettingsScreen.kt:517-522` | open |
-| 29 | "Password age" actually means "last edited" | `detail/CredentialDetailScreen.kt:211-251` | open |
+| 29 | "Password age" actually means "last edited" | `detail/CredentialDetailScreen.kt:211-251` | **fixed** (chunk 6) |
 | 30 | Duplicate-password count inflated; empty passwords grouped | `settings/SettingsViewModel.kt:86-89` | open |
 | 31 | Wrong password in autofill unlock gives zero feedback | `autofill/AutofillAuthActivity.kt:128-131` | **fixed** (chunk 3) |
 | 32 | Biometric failure/cancel is silent | `unlock/UnlockViewModel.kt:73-80` | **fixed** (chunk 3) |

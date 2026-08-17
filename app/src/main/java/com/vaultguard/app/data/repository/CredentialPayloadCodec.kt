@@ -40,7 +40,8 @@ object CredentialPayloadCodec {
         json: String,
         id: String,
         createdAt: Long,
-        updatedAt: Long
+        updatedAt: Long,
+        passwordChangedAt: Long = updatedAt
     ): Credential {
         val obj = JSONObject(json)
         return Credential(
@@ -57,7 +58,8 @@ object CredentialPayloadCodec {
             linkedPackages = obj.optJSONArray("linkedPackages").toStringList(),
             linkedDomains = obj.optJSONArray("linkedDomains").toStringList(),
             createdAt = createdAt,
-            updatedAt = updatedAt
+            updatedAt = updatedAt,
+            passwordChangedAt = passwordChangedAt
         )
     }
 

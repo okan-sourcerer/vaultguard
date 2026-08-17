@@ -20,7 +20,8 @@ data class CredentialSummary(
     val linkedPackages: List<String> = emptyList(),
     val linkedDomains: List<String> = emptyList(),
     val createdAt: Long = 0L,
-    val updatedAt: Long = 0L
+    val updatedAt: Long = 0L,
+    val passwordChangedAt: Long = 0L
 ) {
     val displayName: String get() = appName.ifEmpty { siteName }
 }
@@ -37,5 +38,6 @@ fun Credential.toSummary() = CredentialSummary(
     linkedPackages = linkedPackages,
     linkedDomains = linkedDomains,
     createdAt = createdAt,
-    updatedAt = updatedAt
+    updatedAt = updatedAt,
+    passwordChangedAt = passwordChangedAt
 )

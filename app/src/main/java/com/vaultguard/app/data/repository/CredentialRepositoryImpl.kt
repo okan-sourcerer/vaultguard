@@ -59,9 +59,37 @@ class CredentialRepositoryImpl @Inject constructor(
             encryptedPayload = encrypted.ciphertext,
             iv = encrypted.iv,
             createdAt = existing?.createdAt ?: now,
-            updatedAt = now
+            updatedAt = now,
+            passwordChangedAt = passwordChangedAtFor(existing, credential.password, now)
         )
         credentialDao.upsert(entity)
+    }
+
+    /**
+     * Advances the password-change timestamp only when the password actually differs.
+     *
+     * Comparing means decrypting the stored row, which is why this is not simply
+     * `if (isNewEntry) now else existing.passwordChangedAt`. Without the comparison,
+     * pinning an entry or fixing a typo in its notes would reset its reported password
+     * age (finding #29).
+     */
+    private fun passwordChangedAtFor(
+        existing: CredentialEntity?,
+        newPassword: String,
+        now: Long
+    ): Long {
+        if (existing == null) return now
+
+        val previous = decrypt(existing) as? Decrypted.Success
+        // An unreadable row cannot be compared. Treat the password as changed rather than
+        // carrying forward a timestamp we cannot substantiate.
+            ?: return now
+
+        return if (previous.credential.password == newPassword) {
+            existing.passwordChangedAt
+        } else {
+            now
+        }
     }
 
     override suspend fun delete(id: String) {
@@ -129,7 +157,9 @@ class CredentialRepositoryImpl @Inject constructor(
             val json = String(decrypted, Charsets.UTF_8)
             decrypted.fill(0)
             Decrypted.Success(
-                CredentialPayloadCodec.decode(json, entity.id, entity.createdAt, entity.updatedAt)
+                CredentialPayloadCodec.decode(
+                    json, entity.id, entity.createdAt, entity.updatedAt, entity.passwordChangedAt
+                )
             )
         } catch (e: Exception) {
             Decrypted.Failure(e.message ?: e::class.java.simpleName)

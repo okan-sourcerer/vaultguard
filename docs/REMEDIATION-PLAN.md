@@ -391,7 +391,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 3 — Visibility | #40, #7, #38, #31, #32 | **done** — 35 tests |
 | 4 — Biometric lifecycle | #6, #8 | **done** — 24 tests |
 | 5 — Atomicity + threading | #5, #17, #18 | **done** — 20 tests |
-| 6 — Schema 1→2 | #29 | not started |
+| 6 — Schema 1→2 | #29 | **done** — 6 unit + 4 migration tests |
 | 7 — Backup v2 | #3 | not started |
 | 8 — Autofill security | #9, #10, #11, #13, #34, #35 | not started |
 | 9 — Auth hardening | #12 | not started |
