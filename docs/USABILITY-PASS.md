@@ -1,15 +1,19 @@
 # Usability pass — device walkthrough
 
-The script for chunk 15. Run it on the phone holding the live vault, with the app in front
-of you rather than the code.
+Run this on the phone holding the live vault, with the app in front of you rather than the
+code. It covers chunks 14 and 15, neither of which has been exercised on a device, and then
+sweeps everything that was verified earlier.
 
 Its purpose is not to confirm the tests pass — they already do. It is to catch the two
 things tests cannot see: **platform behaviour**, where Android decides the outcome and the
 source gives no hint (three real bugs so far arrived this way), and **friction**, where the
 app is correct and still annoying to use.
 
+Sections A and B are the unverified code and are worth doing first. Everything after them
+is regression cover.
+
 Record what you find as you go. Anything that is wrong becomes a numbered finding in
-[FINDINGS.md](FINDINGS.md) starting at #57; anything that is merely irritating goes in the
+[FINDINGS.md](FINDINGS.md) starting at #64; anything that is merely irritating goes in the
 Friction log at the end of this file, which is where the next round of work comes from.
 
 ---
@@ -81,7 +85,7 @@ if a save prompt appears after the *username* screen, before any password was ty
 `FLAG_DELAY_SAVE` is not being honoured.
 
 **Note:** press **Back** to dismiss the prompt without saving. **Skip** is different: it
-records a dismissal for that site, which is its own test in B3.
+records a dismissal for that site, which is its own test in C3.
 
 ### A4. Two-step login for a credential you already have (#55)
 
@@ -121,106 +125,197 @@ crash.
 
 ---
 
-## Section B — Autofill, the rest
+## Section B — Chunk 15, the flow fixes
+
+Ordinary Compose rather than platform promises, so less can go silently wrong here than in
+section A. But B3 and B4 are both about timing and back-navigation, which is where a device
+most often disagrees with a passing test — and B5 is the one where being wrong is expensive.
+
+### B1. Pinning works in both directions (#57)
+
+**Do:** on the vault list, look at an entry that is *not* pinned.
+
+**Expect:** an outlined pin on every row. Tapping it pins the entry, which jumps to a
+**Pinned** group at the top and the pin fills in. Tapping again unpins it.
+
+**Suspect if:** unpinned rows still show no pin at all — the old behaviour.
+
+### B2. Pinning is not an edit (#58)
+
+**Do:** open an entry and note its **Updated** date. Go back, pin it, reopen it.
+
+**Expect:** the Updated date is **unchanged**. Now edit its notes and reopen: it moves to
+today.
+
+**Note:** existing entries have no stored content date yet, so they will show their old row
+date until the first time you edit them. That is intended, not a bug.
+
+### B3. Undo a delete (#59)
+
+**Do:** delete an entry from its detail screen.
+
+**Expect:** the list appears with a **Credential deleted** snackbar offering **Undo**.
+Tapping Undo brings the entry back, unchanged and still in the right place.
+
+**Then:** delete another and let the snackbar time out without touching it. The entry stays
+gone — check it is absent from search as well as the list.
+
+**Suspect if:** no snackbar appears at all, or Undo restores the entry but it looks
+different afterwards. Also check the entry count returns to your recorded number after an
+Undo.
+
+### B4. Leaving Add/Edit warns you (#60)
+
+**Do:** tap **+**, type a site name and a password, then press system Back.
+
+**Expect:** **Discard changes?** — *Keep editing* returns with everything still typed;
+*Discard* leaves and saves nothing.
+
+**Then:** open an existing entry, go to Edit, change nothing, press Back. It should leave
+**immediately with no prompt**. A guard that fires when nothing was typed is worse than no
+guard, because it trains you to dismiss it.
+
+**Also:** the toolbar arrow must behave the same as the system Back gesture.
+
+### B5. Editing keeps autofill working (#61)
+
+**The most important item in this section**, because failure here is silent and you would
+not notice for weeks.
+
+**Do:** pick an entry that was *captured by autofill* from an app or website. Edit
+something harmless — the category, or the notes — and save. Then go to that app or site and
+tap its login field.
+
+**Expect:** VaultGuard still offers the credential, exactly as before the edit.
+
+**Suspect if:** it is no longer offered, or is offered only after you type part of the site
+name. That is the links being dropped, which is the bug this was meant to fix.
+
+### B6. A rotated password is offered as an update (#56)
+
+**Do:** change your password on some website, then sign in with the new one.
+
+**Expect:** a prompt headed **Password changed?** naming the entry, offering **Update** —
+not a second copy of the entry. Accept it, then open the entry: the new password is stored,
+the rest of the entry is untouched, and the password age has reset to today.
+
+**Suspect if:** you get the ordinary "Save to VaultGuard?" screen instead, or nothing at
+all.
+
+### B7. Preset deletion asks (#62)
+
+**Do:** generator → preset dropdown → the delete icon on a saved preset.
+
+**Expect:** a confirmation naming the preset. Cancel leaves it alone.
+
+### B8. "1 minute" (#63)
+
+**Do:** Settings → auto-lock timeout, and open the dropdown.
+
+**Expect:** "1 minute", not "1 minutes". Everything else reads "N minutes".
+
+---
+
+## Section C — Autofill, the rest
 
 Regression cover for chunk 8a, all of it previously verified.
 
-**B1. In a browser (#48).** Log in to a site in Chrome. Suggestions offered, fill works,
+**C1. In a browser (#48).** Log in to a site in Chrome. Suggestions offered, fill works,
 and the entry that saves is scoped to *that site*, not to Chrome.
 
-**B2. A new credential saves (#47).** Sign up for something, or change a password
+**C2. A new credential saves (#47).** Sign up for something, or change a password
 somewhere. The save prompt appears and the entry lands in the vault.
 
-**B3. Skip is scoped (#49).** On site A, tap **Skip** on a save prompt. Then log in to
+**C3. Skip is scoped (#49).** On site A, tap **Skip** on a save prompt. Then log in to
 site B. B must still offer to save. Then Settings → Dismissed save prompts → reset, and
 site A offers again.
 
-**B4. Matching is not loose (#11, #13).** Confirm a credential saved for one site is not
+**C4. Matching is not loose (#11, #13).** Confirm a credential saved for one site is not
 offered on an unrelated one with a similar name.
 
-**B5. The toggle honours off (#39).** Settings → turn autofill off. Confirm no suggestions
+**C5. The toggle honours off (#39).** Settings → turn autofill off. Confirm no suggestions
 appear anywhere. Turn it back on.
 
 ---
 
-## Section C — Unlock, lock, and the session
+## Section D — Unlock, lock, and the session
 
-**C1. Master password.** Correct password unlocks. Wrong password says so plainly.
+**D1. Master password.** Correct password unlocks. Wrong password says so plainly.
 
-**C2. Lockout escalates and survives (#12).** Enter a wrong password five or six times.
+**D2. Lockout escalates and survives (#12).** Enter a wrong password five or six times.
 The delay should grow past 32 seconds. Force-stop the app and reopen: **the lockout must
 still be in force.** You will have to wait it out — do this when you are not in a hurry.
 
-**C3. Biometric (#6, #8, #32).** Unlock with the fingerprint. Then cancel a fingerprint
+**D3. Biometric (#6, #8, #32).** Unlock with the fingerprint. Then cancel a fingerprint
 prompt and confirm the failure is *stated*, not silent.
 
-**C4. Auto-lock persists (#25).** Set the timeout to 1 minute. Force-stop the app and
+**D4. Auto-lock persists (#25).** Set the timeout to 1 minute. Force-stop the app and
 reopen Settings: the setting must still read 1 minute. Then background the app, wait,
 return — it should be locked.
 
-**C5. Screenshots blocked (#13).** Try to screenshot the vault list, the detail screen, and
+**D5. Screenshots blocked (#13).** Try to screenshot the vault list, the detail screen, and
 the autofill unlock prompt. All three should refuse.
 
-**C6. Process death.** Open the vault, then force-stop and reopen. You should get the
+**D6. Process death.** Open the vault, then force-stop and reopen. You should get the
 unlock screen, never a stale vault list.
 
 ---
 
-## Section D — Credentials
+## Section E — Credentials
 
-**D1. Add** a credential by hand. **Edit** it. **Delete** it. Count returns to your
+**E1. Add** a credential by hand. **Edit** it. **Delete** it. Count returns to your
 recorded number.
 
-**D2. Generator hands back (#33).** Add/Edit → generate a password → "Use this password".
+**E2. Generator hands back (#33).** Add/Edit → generate a password → "Use this password".
 It should land in the field you came from, not be lost.
 
-**D3. Copy and auto-clear (#36).** Copy a password from the detail screen. Switch to
+**E3. Copy and auto-clear (#36).** Copy a password from the detail screen. Switch to
 another app and wait 30 seconds, then check the clipboard — it should be empty. Then copy
 again and paste **immediately**; that must still work.
 
-**D4. Password age (#29).** Edit a credential changing only the *notes*. The age must not
+**E4. Password age (#29).** Edit a credential changing only the *notes*. The age must not
 reset. Change the password: it should.
 
-**D5. Search and categories.** Search finds by site and by username. Category chips filter
+**E5. Search and categories.** Search finds by site and by username. Category chips filter
 as expected.
 
-**D6. Breach check (#14).** Run it on a credential. Read the wording closely: it must not
+**E6. Breach check (#14).** Run it on a credential. Read the wording closely: it must not
 claim to know more than it does.
 
 ---
 
-## Section E — Settings and stats
+## Section F — Settings and stats
 
-**E1. Vault Stats (#26, #27, #30).** Weak count, duplicate count, and the older-than-90-days
+**F1. Vault Stats (#26, #27, #30).** Weak count, duplicate count, and the older-than-90-days
 count. Cross-check one by hand — a credential you know is weak should be counted, and two
 entries sharing a password should count as one duplicate pair, not two.
 
-**E2. Change master password [RISK] (#5).** Only with the backup from step 1 in hand.
+**F2. Change master password [RISK] (#5).** Only with the backup from step 1 in hand.
 Change it, then: unlock with the new password, confirm **every** entry still opens, and
 re-enrol biometrics — they are deliberately disabled by the change, and the UI should say
 so.
 
-**E3. Sync copy is truthful (#15).** With sync off, the screen must say the vault is local.
+**F3. Sync copy is truthful (#15).** With sync off, the screen must say the vault is local.
 Turn sync on, sync, and confirm the state text matches reality.
 
-**E4. Delete cloud copy [RISK to remote only].** "Turn off and delete cloud copy". The
+**F4. Delete cloud copy [RISK to remote only].** "Turn off and delete cloud copy". The
 remote is disposable by design; confirm the local vault is untouched afterwards.
 
 ---
 
-## Section F — Backup
+## Section G — Backup
 
-**F1. Export.** Already done in step 1. Confirm the file is a plausible size, and that a
+**G1. Export.** Already done in step 1. Confirm the file is a plausible size, and that a
 wrong backup password on import is rejected with a clear message rather than an empty
 import.
 
-**F2. Import [RISK].** Merge mode is additive — importing your own backup **will**
+**G2. Import [RISK].** Merge mode is additive — importing your own backup **will**
 duplicate every entry. Only do this if you are willing to clean up afterwards, or have a
 spare device. If you skip it, say so; an untested restore path is worth knowing about.
 
 ---
 
-## Section G — The friction sweep
+## Section H — The friction sweep
 
 No pass or fail here. Use the app for ten minutes as you normally would and answer:
 
@@ -252,5 +347,15 @@ No pass or fail here. Use the app for ten minutes as you normally would and answ
 
 ## Defects found
 
-Add to [FINDINGS.md](FINDINGS.md) as #57 onward, with the section reference from this file
+Add to [FINDINGS.md](FINDINGS.md) as #64 onward, with the section reference from this file
 so the reproduction is recorded alongside.
+
+The flow audit that produced #57–#63 asked three mechanical questions of each screen, and
+they are worth re-asking of anything this pass turns up:
+
+- Can every action be reversed the same way it was made?
+- Does the app display a fact it actually knows, or one that merely correlates?
+- Does a write preserve the fields the screen doing the writing does not model?
+
+The third found #61, which is the kind of defect this walkthrough exists for: invisible
+from any single screen, and harmless-looking until autofill quietly stops working.
