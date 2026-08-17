@@ -31,6 +31,7 @@ device: vault loads, biometrics, autofill, and clipboard clearing all confirmed 
 | `data/remote/` | [docs/SYNC.md](docs/SYNC.md) |
 | Anything at all | [docs/FINDINGS.md](docs/FINDINGS.md) — the defect is probably already known |
 | Planning work | [docs/REMEDIATION-PLAN.md](docs/REMEDIATION-PLAN.md) |
+| Verifying on the device | [docs/USABILITY-PASS.md](docs/USABILITY-PASS.md) — the walkthrough script |
 
 ## The key hierarchy, in one paragraph
 

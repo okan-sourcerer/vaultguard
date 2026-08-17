@@ -404,7 +404,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 13 — Breach check honesty | #14 | **done** — 15 tests |
 | 13a — Clipboard actually clears | #36 regression | **done** — foreground service; the first two attempts never fired |
 | 14 — Autofill completeness | #50, #51, #53, #54, #55 | **code done** — 10 tests; not yet exercised on the device |
-| 15 — Usability pass | #56 and whatever it turns up | not started |
+| 15 — Usability pass | #56 and whatever it turns up | not started — script in [USABILITY-PASS.md](USABILITY-PASS.md) |
 
 ---
 
