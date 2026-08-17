@@ -91,6 +91,7 @@ fun SettingsScreen(
     var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
     // TEMPORARY — cleartext migration aid, remove with the `migration` package.
     var showCleartextWarning by remember { mutableStateOf(false) }
+    var exportUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     // Google Sign-In launcher
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -105,7 +106,9 @@ fun SettingsScreen(
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
-        uri?.let { viewModel.onExport(it) }
+        // The backup password is asked for after a destination is chosen, so a cancelled
+        // file picker does not waste the user's time typing one.
+        uri?.let { exportUri = it }
     }
 
     val importLauncher = rememberLauncherForActivityResult(
@@ -174,6 +177,23 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showCleartextWarning = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Export password dialog
+    exportUri?.let { uri ->
+        BackupPasswordDialog(
+            title = "Encrypt this backup",
+            body = "Choose a password for the backup file. It is independent of your master " +
+                "password, and it is the only thing that can open the file — if you lose it, " +
+                "the backup is unrecoverable.",
+            confirmText = "Export",
+            requireConfirmation = true,
+            onDismiss = { exportUri = null },
+            onConfirm = { password ->
+                exportUri = null
+                viewModel.onExport(uri, password)
             }
         )
     }
@@ -601,50 +621,111 @@ private fun ImportDialog(
     onDismiss: () -> Unit,
     onConfirm: (password: String, merge: Boolean) -> Unit
 ) {
-    var password by remember { mutableStateOf("") }
     var merge by remember { mutableStateOf(true) }
+
+    BackupPasswordDialog(
+        title = "Restore backup",
+        body = "Enter the password this backup was encrypted with. For older backups that " +
+            "is the master password that was in use at the time.",
+        confirmText = "Import",
+        requireConfirmation = false,
+        onDismiss = onDismiss,
+        onConfirm = { password -> onConfirm(password, merge) },
+        extraContent = {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Merge (keep existing)", modifier = Modifier.weight(1f))
+                Switch(checked = merge, onCheckedChange = { merge = it })
+            }
+            Text(
+                if (merge) "Existing entries are kept; only unseen ones are added."
+                else "The vault is replaced by the backup. Entries not in the backup are removed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    )
+}
+
+/**
+ * Password prompt shared by backup export and import.
+ *
+ * [requireConfirmation] adds a second field, used when exporting: a typo in a backup
+ * password is undiscoverable until the day the backup is needed.
+ */
+@Composable
+private fun BackupPasswordDialog(
+    title: String,
+    body: String,
+    confirmText: String,
+    requireConfirmation: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+    extraContent: @Composable () -> Unit = {}
+) {
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Import Vault") },
+        title = { Text(title) },
         text = {
             Column {
-                Text("Enter the master password that was used when this backup was created.")
-                Spacer(modifier = Modifier.height(8.dp))
+                Text(body, style = MaterialTheme.typography.bodySmall)
+                Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it },
+                    onValueChange = { password = it; error = null },
                     label = { Text("Backup password") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        autoCorrectEnabled = false
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Merge (skip existing)", modifier = Modifier.weight(1f))
-                    Switch(checked = merge, onCheckedChange = { merge = it })
+                if (requireConfirmation) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = confirmation,
+                        onValueChange = { confirmation = it; error = null },
+                        label = { Text("Confirm backup password") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            autoCorrectEnabled = false
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-                Text(
-                    if (merge) "Existing credentials will be kept, only new ones imported"
-                    else "All existing credentials will be replaced",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                extraContent()
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { if (password.isNotEmpty()) onConfirm(password, merge) },
-                enabled = password.isNotEmpty()
-            ) { Text("Import") }
+                enabled = password.isNotEmpty(),
+                onClick = {
+                    when {
+                        password.length < 8 && requireConfirmation ->
+                            error = "Use at least 8 characters"
+                        requireConfirmation && password != confirmation ->
+                            error = "Passwords do not match"
+                        else -> onConfirm(password)
+                    }
+                }
+            ) { Text(confirmText) }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
 

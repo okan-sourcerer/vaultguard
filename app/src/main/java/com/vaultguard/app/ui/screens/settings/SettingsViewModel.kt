@@ -11,8 +11,10 @@ import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.data.remote.FirebaseSyncService
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.domain.usecase.ChangeMasterPasswordUseCase
-import com.vaultguard.app.domain.usecase.ExportVaultUseCase
-import com.vaultguard.app.domain.usecase.ImportVaultUseCase
+import com.vaultguard.app.domain.usecase.backup.ExportVaultUseCase
+import com.vaultguard.app.domain.usecase.backup.ImportVaultUseCase
+import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
+import com.vaultguard.app.domain.usecase.backup.WrongBackupPasswordException
 import com.vaultguard.app.domain.usecase.migration.ExportCleartextVaultUseCase
 import com.vaultguard.app.security.BiometricAuthManager
 import com.vaultguard.app.security.GoogleAuthManager
@@ -186,26 +188,51 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun onExport(uri: Uri) {
+    fun onExport(uri: Uri, backupPassword: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                exportVaultUseCase(uri)
-                _uiState.value = _uiState.value.copy(isLoading = false, message = "Vault exported successfully")
+                val count = exportVaultUseCase(uri, backupPassword.toCharArray())
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    message = "Exported $count credentials. Keep the backup password safe — " +
+                        "without it the file cannot be restored."
+                )
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "Export failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Export failed: ${e.message}"
+                )
             }
         }
     }
 
-    fun onImport(uri: Uri, masterPassword: String, merge: Boolean) {
+    fun onImport(uri: Uri, backupPassword: String, merge: Boolean) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                importVaultUseCase(uri, masterPassword.toCharArray(), merge)
-                _uiState.value = _uiState.value.copy(isLoading = false, message = "Vault imported successfully")
+                val result = importVaultUseCase(uri, backupPassword.toCharArray(), merge)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    message = buildString {
+                        append("Imported ${result.imported} credentials")
+                        if (result.skipped > 0) append(", ${result.skipped} already present")
+                        if (result.replaced > 0) append(", ${result.replaced} replaced")
+                        append(".")
+                        if (result.formatVersion == VaultBackupFormat.VERSION_1) {
+                            append(" This was an old-format backup — export a fresh one.")
+                        }
+                    }
+                )
+            } catch (e: WrongBackupPasswordException) {
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+            } catch (e: VaultBackupFormat.UnsupportedBackupException) {
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(isLoading = false, error = "Import failed: ${e.message}")
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Import failed: ${e.message}"
+                )
             }
         }
     }

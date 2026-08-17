@@ -14,9 +14,12 @@ class KeyDerivation @Inject constructor() {
     companion object {
         private const val SALT_SIZE_BYTES = 16
         private const val KEY_SIZE_BYTES = 32
-        private const val MEMORY_COST_KIB = 65536
-        private const val ITERATIONS = 3
-        private const val PARALLELISM = 4
+
+        /** Frozen for the vault. Backups carry their own copy — see docs/SECURITY.md. */
+        const val MEMORY_COST_KIB = 65536
+        const val ITERATIONS = 3
+        const val PARALLELISM = 4
+        const val ARGON2_VERSION = 19
     }
 
     private val secureRandom = SecureRandom()
@@ -25,14 +28,31 @@ class KeyDerivation @Inject constructor() {
         return ByteArray(SALT_SIZE_BYTES).also { secureRandom.nextBytes(it) }
     }
 
-    fun deriveKey(masterPassword: CharArray, salt: ByteArray): SecretKey {
+    /** Derives with the vault's frozen parameters. See docs/SECURITY.md. */
+    fun deriveKey(masterPassword: CharArray, salt: ByteArray): SecretKey =
+        deriveKey(masterPassword, salt, MEMORY_COST_KIB, ITERATIONS, PARALLELISM)
+
+    /**
+     * Derives with explicit cost parameters.
+     *
+     * Only backup files use this: they carry their own KDF block so that a future change
+     * to the vault's parameters cannot orphan an old backup. The vault itself must always
+     * go through the no-argument overload.
+     */
+    fun deriveKey(
+        masterPassword: CharArray,
+        salt: ByteArray,
+        memoryKib: Int,
+        iterations: Int,
+        parallelism: Int
+    ): SecretKey {
         val passwordBytes = masterPassword.toPasswordBytes()
         try {
             val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
                 .withVersion(Argon2Parameters.ARGON2_VERSION_13)
-                .withMemoryAsKB(MEMORY_COST_KIB)
-                .withIterations(ITERATIONS)
-                .withParallelism(PARALLELISM)
+                .withMemoryAsKB(memoryKib)
+                .withIterations(iterations)
+                .withParallelism(parallelism)
                 .withSalt(salt)
                 .build()
 

@@ -120,10 +120,11 @@ live, never-synced entries — which is correct behaviour, just undocumented.
 | Merge | For each imported row, insert only if `id` is absent locally. Existing rows win. |
 | Replace | Soft-delete **every** local row, then upsert all imported rows. Local-only entries survive as tombstones and become unreachable. |
 
-## Backup file — format v2 (planned)
+## Backup file — format v2
 
 Fixes #3 by collapsing to a **single** encryption layer whose key is fully described by
-the file. Specified here so the implementation and its tests agree.
+the file. Written by `ExportVaultUseCase`, read by `ImportVaultUseCase`; the parsing and
+validation live in `VaultBackupFormat`.
 
 ```json
 {
@@ -167,8 +168,12 @@ Design points:
   export time. A backup stays valid after a master-password change.
 - **Import re-encrypts.** Each credential is sealed under the importing device's current
   session key with a fresh IV. This is the actual fix.
-- **v1 remains importable**, read-only, on the same-key path it already works for. Any
-  existing v1 backup the user holds must keep working.
+- **v1 is importable and now actually restorable.** Its outer envelope and its inner
+  payloads were sealed under the same key, so the backup password opens both layers; the
+  importer decrypts each payload and re-seals it like any other entry. A v1 file that
+  could previously only be restored onto the exporting device now restores anywhere.
+- **Costs are bounded on read.** A file is untrusted input, so declared Argon2 parameters
+  outside sane limits are rejected rather than attempted.
 - The password-to-bytes encoding for v2's Argon2 call stays the frozen UTF-16BE routine
   documented in [SECURITY.md](SECURITY.md), so one code path serves both.
 

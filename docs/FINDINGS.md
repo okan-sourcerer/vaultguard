@@ -11,7 +11,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | --- | --- | --- | --- |
 | 1 | DI deletes the entire vault on any DB-open failure | `di/DatabaseModule.kt:35-50` | **fixed** (chunk 2) |
 | 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | **fixed** (chunk 2) |
-| 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | open |
+| 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | **fixed** (chunk 7) |
 | 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open — sharpened by the vault-key change, see below |
 | 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | **fixed** (chunk 5) |
 | 6 | Password change leaves biometric wrapping the old key | `usecase/ChangeMasterPasswordUseCase.kt` | **fixed** (chunk 4) |
@@ -28,10 +28,14 @@ including `vault.db` and the Keystore-backed preferences. The Keystore master ke
 backed up, so on restore the preferences are unreadable, a new DB passphrase is generated,
 the restored database fails to open, and #1 deletes it.
 
-**#3** — export seals an outer envelope under the session key but leaves each
-`encryptedPayload` under the export-time master key; import re-inserts those bytes without
-re-encrypting. Only round-trips on the same device with an unchanged master password. See
-[DATA-FORMATS.md](DATA-FORMATS.md).
+**#3** — export sealed an outer envelope under the session key but left each
+`encryptedPayload` under the export-time master key; import re-inserted those bytes without
+re-encrypting. Only round-tripped on the same device with an unchanged master password.
+
+Fixed by format v2: a single encryption layer, a backup password independent of the master
+password, KDF parameters carried in the file, and an importer that re-encrypts under the
+receiving vault's key. Existing v1 files became restorable in the same change — their outer
+envelope and inner payloads share one key, so the backup password opens both.
 
 **#4** — `fullSync()` runs *before* `lockVault()`, pushing rows encrypted under the old
 local key into the shared remote vault, and the adopted salt orphans every local row.

@@ -394,7 +394,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 6 — Schema 1→2 | #29 | **done** — 6 unit + 4 migration tests |
 | 6a — Schema 2→3 | #29 correction | **done** — the v2 backfill's source had been clobbered |
 | 6.5 — Vault-key indirection | structural fix behind #5, #6 | **done** — 164 tests |
-| 7 — Backup v2 | #3 | not started |
+| 7 — Backup v2 | #3 | **done** — 27 tests |
 | 8 — Autofill security | #9, #10, #11, #13, #34, #35 | not started |
 | 9 — Auth hardening | #12 | not started |
 | 10 — Sync rework | #19–#24, #4, #15, #16 | not started |
