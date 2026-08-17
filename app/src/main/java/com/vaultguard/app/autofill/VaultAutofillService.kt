@@ -38,6 +38,15 @@ class VaultAutofillService : AutofillService() {
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    /**
+     * Every PendingIntent used to be built with request code 0 and FLAG_CANCEL_CURRENT, so
+     * a second fill request cancelled the first one's authentication intent — routine on a
+     * page with more than one form.
+     */
+    private val requestCodes = java.util.concurrent.atomic.AtomicInteger(0)
+
+    private fun nextRequestCode() = requestCodes.incrementAndGet()
+
     override fun onFillRequest(
         request: FillRequest,
         cancellationSignal: CancellationSignal,
@@ -75,8 +84,8 @@ class VaultAutofillService : AutofillService() {
             }
 
             val pendingIntent = PendingIntent.getActivity(
-                this, 0, authIntent,
-                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_CANCEL_CURRENT
+                this, nextRequestCode(), authIntent,
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
             val presentation = RemoteViews(packageName, R.layout.autofill_item).apply {
@@ -156,20 +165,35 @@ class VaultAutofillService : AutofillService() {
                     findMatchingCredentials(parsed.webDomain, parsed.packageName)
                         .any { it.username == username }
 
-                if (!isDuplicate) {
-                    val saveIntent = Intent(this@VaultAutofillService, AutofillSaveActivity::class.java).apply {
-                        putExtra(AutofillSaveActivity.EXTRA_USERNAME, username)
-                        putExtra(AutofillSaveActivity.EXTRA_PASSWORD, password)
-                        putExtra(AutofillSaveActivity.EXTRA_WEB_DOMAIN, parsed.webDomain)
-                        putExtra(AutofillSaveActivity.EXTRA_PACKAGE_NAME, parsed.packageName)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(saveIntent)
+                if (isDuplicate) {
+                    callback.onSuccess()
+                    return@launch
                 }
+
+                val saveIntent = Intent(this@VaultAutofillService, AutofillSaveActivity::class.java).apply {
+                    putExtra(AutofillSaveActivity.EXTRA_USERNAME, username)
+                    putExtra(AutofillSaveActivity.EXTRA_PASSWORD, password)
+                    putExtra(AutofillSaveActivity.EXTRA_WEB_DOMAIN, parsed.webDomain)
+                    putExtra(AutofillSaveActivity.EXTRA_PACKAGE_NAME, parsed.packageName)
+                }
+
+                // Hand the system an IntentSender and let *it* launch the dialog.
+                //
+                // This used to call startActivity() directly. A service in the background
+                // cannot start an activity on Android 10 and above, so the save prompt was
+                // silently blocked — which is why saving from autofill appeared to do
+                // nothing at all (finding #47). SaveCallback.onSuccess(IntentSender) exists
+                // for exactly this and has been available since API 28; minSdk is 28.
+                val pendingIntent = PendingIntent.getActivity(
+                    this@VaultAutofillService,
+                    nextRequestCode(),
+                    saveIntent,
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                callback.onSuccess(pendingIntent.intentSender)
             } catch (e: Exception) {
                 Timber.e(e, "Autofill save handling failed")
-            } finally {
-                // Always answer — an unanswered SaveCallback leaves the system waiting.
+                // Still answer, or the system waits on a callback that never comes.
                 callback.onSuccess()
             }
         }

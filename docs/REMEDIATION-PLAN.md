@@ -26,8 +26,13 @@ These come from the project's actual situation and shape every decision below.
   a regression shows up as an error instead of an empty list.
 - **Chunk 7 (working export) before chunk 10 (sync rework)** so there is a real backup
   path in place before touching the riskiest subsystem.
-- **Chunk 12 last** because ProGuard verification requires a release build, which is only
-  meaningful once the code has stopped moving.
+- **Chunk 12 last among the fixes** because ProGuard verification requires a release
+  build, which is only meaningful once the code has stopped moving.
+- **A usability pass follows the catalogue**, walking each feature end-to-end on a real
+  device. Chunk 8a exists because autofill got that treatment early and it immediately
+  turned up three defects no amount of code review had — the platform constraints that
+  decide whether a feature works are invisible in the source. The remaining autofill items
+  (#50, #51, #53) are held for that pass, along with anything else it finds.
 
 ## Test strategy
 
@@ -396,7 +401,9 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 6.5 — Vault-key indirection | structural fix behind #5, #6 | **done** — 164 tests |
 | 7 — Backup v2 | #3 | **done** — 27 tests |
 | 8 — Autofill security | #9, #10, #11, #13, #34, #35 | **done** — 36 tests |
+| 8a — Autofill usability | #47, #48, #49, #52 | **done** — 12 tests |
 | 9 — Auth hardening | #12 | not started |
 | 10 — Sync rework | #19–#24, #4, #15, #16 | not started |
 | 11 — Business logic + UX | #25–#28, #30, #33, #36, #37, #39 | not started |
 | 12 — Build + hygiene | #41–#46 | not started |
+| 13 — Usability pass | #50, #51, #53 and whatever it turns up | not started |

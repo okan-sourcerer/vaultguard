@@ -94,6 +94,41 @@ at all.
 unknown state, so it returns `isBreached = false` and the UI prints a green all-clear.
 Non-200 responses behave the same.
 
+## P1b — Autofill usability
+
+Found while reviewing why autofill was unpleasant enough not to be used. These are not in
+the original 2026-08-17 catalogue: that review looked for logic and security defects in the
+code as written, and did not ask whether the feature functions end-to-end on a current
+Android device. That question depends on platform constraints — background-activity-launch
+rules, compatibility mode, inline suggestions — which the code gives no hint of.
+
+None are data-loss or security issues. They are the difference between a feature that is
+correct and one worth switching on.
+
+| # | Defect | Location | Status |
+| --- | --- | --- | --- |
+| 47 | Save dialog launched with `startActivity` from a service; blocked on Android 10+ | `autofill/VaultAutofillService.kt` | **fixed** (chunk 8a) |
+| 48 | No `<compatibility-package>` entries, so browsers fill unreliably or not at all | `res/xml/autofill_service_config.xml` | **fixed** (chunk 8a) |
+| 49 | Dismissal key collapses to the browser package, silencing every site at once | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8a) |
+| 50 | No inline suggestions, so results never reach the keyboard strip | `autofill/VaultAutofillService.kt` | open |
+| 51 | `cancellationSignal` ignored; responses delivered after cancellation | `autofill/VaultAutofillService.kt:43` | open |
+| 52 | Shared `PendingIntent` request code cancelled concurrent auth intents | `autofill/VaultAutofillService.kt` | **fixed** (chunk 8a) |
+| 53 | `settingsActivity` points at `MainActivity`, landing on the unlock screen | `res/xml/autofill_service_config.xml` | open |
+
+**#47** — `SaveCallback.onSuccess(IntentSender)` exists precisely so the *system* launches
+the dialog. Calling `startActivity` from a backgrounded service is blocked on Android 10
+and above, so the save prompt was silently suppressed and saving from autofill appeared to
+do nothing.
+
+**#48** — most Android browsers do not implement the Autofill Framework's virtual-view API.
+Without a per-package opt-in the service receives no structure, or one with no web domain.
+That missing domain is also what triggered #49.
+
+**#49** — the key was `webDomain ?: packageName`, so in a browser it became the browser's
+own package. Tapping Skip once on a single website silenced the save prompt for everything
+browsed thereafter. #34 added expiry to this without addressing the key.
+
+
 ## P2 — Sync correctness
 
 | # | Defect | Location | Status |

@@ -1,3 +1,103 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Autofill service declaration.
+
+    The <compatibility-package> entries opt VaultGuard into autofill compatibility mode
+    for browsers (finding #48). Most Android browsers do not implement the Autofill
+    Framework's virtual-view API, so without an explicit opt-in per package the platform
+    hands the service either nothing at all or a structure with no web domain — which is
+    why filling on websites barely worked.
+
+    Compatibility mode has costs the platform wants acknowledged rather than assumed:
+    it derives the page structure from the accessibility tree, recovers the URL from the
+    browser's address bar, and slows the browser down. That is why it is opt-in.
+
+    This list must stay in step with KnownBrowsers.PACKAGES, which the dismissal store
+    uses to tell a browser apart from an ordinary app.
+
+    maxLongVersionCode is set high enough to cover every current and foreseeable
+    release; the attribute is required and has no "any version" value.
+-->
 <autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:settingsActivity="com.vaultguard.app.MainActivity" />
+    android:settingsActivity="com.vaultguard.app.MainActivity">
+
+    <compatibility-package
+        android:name="com.android.chrome"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.chrome.beta"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.chrome.dev"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.chrome.canary"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="org.chromium.chrome"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="org.mozilla.firefox"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="org.mozilla.firefox_beta"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="org.mozilla.fenix"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="org.mozilla.focus"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.microsoft.emmx"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.brave.browser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.brave.browser_beta"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.vivaldi.browser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.kiwibrowser.browser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.sec.android.app.sbrowser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.sec.android.app.sbrowser.beta"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.duckduckgo.mobile.android"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.ecosia.android"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.opera.browser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.opera.browser.beta"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.opera.mini.native"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.opera.touch"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.opera.gx"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.yandex.browser"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.UCMobile.intl"
+        android:maxLongVersionCode="1000000000" />
+    <compatibility-package
+        android:name="com.qwant.liberty"
+        android:maxLongVersionCode="1000000000" />
+
+</autofill-service>
