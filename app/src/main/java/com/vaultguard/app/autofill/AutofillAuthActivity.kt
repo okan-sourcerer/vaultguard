@@ -3,6 +3,8 @@ package com.vaultguard.app.autofill
 import android.content.Intent
 import android.os.Bundle
 import android.service.autofill.Dataset
+import android.service.autofill.FillResponse
+import android.view.WindowManager
 import android.view.autofill.AutofillId
 import android.view.autofill.AutofillManager
 import android.view.autofill.AutofillValue
@@ -35,18 +37,30 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.vaultguard.app.R
+import com.vaultguard.app.data.local.db.dao.CredentialDao
+import com.vaultguard.app.data.repository.CredentialPayloadCodec
 import com.vaultguard.app.domain.model.Credential
 import com.vaultguard.app.domain.usecase.UnlockVaultUseCase
 import com.vaultguard.app.security.CryptoManager
 import com.vaultguard.app.security.EncryptedData
 import com.vaultguard.app.security.MasterPasswordManager
-import com.vaultguard.app.data.local.db.dao.CredentialDao
 import com.vaultguard.app.ui.theme.VaultGuardTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+import kotlinx.coroutines.withContext
+import timber.log.Timber
 import javax.inject.Inject
 
+/**
+ * Unlocks the vault in response to an autofill request, then hands back **every** matching
+ * credential for the user to choose from.
+ *
+ * It previously returned `credentials.first()` as a single dataset with no choice offered,
+ * using matching rules looser than the service's own (finding #11). The service now
+ * authenticates the whole `FillResponse`, so this can answer with a response rather than
+ * one dataset, and matching goes through the shared [CredentialMatcher].
+ */
 @AndroidEntryPoint
 class AutofillAuthActivity : ComponentActivity() {
 
@@ -64,6 +78,10 @@ class AutofillAuthActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // This screen takes the master password. Only MainActivity used to set this, so
+        // the two autofill activities were screenshotable and appeared in the recents
+        // thumbnail (finding #13).
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN)
         val appPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME)
@@ -84,7 +102,7 @@ class AutofillAuthActivity : ComponentActivity() {
                         if (isBusy || password.isEmpty()) return
                         isBusy = true
                         scope.launch {
-                            error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
+                            error = unlockAndRespond(password, webDomain, appPackage, usernameIds, passwordIds)
                             isBusy = false
                         }
                     }
@@ -104,20 +122,20 @@ class AutofillAuthActivity : ComponentActivity() {
                             onValueChange = { password = it; error = null },
                             label = { Text("Master Password") },
                             singleLine = true,
+                            enabled = !isBusy,
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Password,
                                 imeAction = ImeAction.Done,
                                 autoCorrectEnabled = false
                             ),
-                            enabled = !isBusy,
                             keyboardActions = KeyboardActions(onDone = { submit() }),
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        if (error != null) {
+                        error?.let {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(error!!, color = MaterialTheme.colorScheme.error)
+                            Text(it, color = MaterialTheme.colorScheme.error)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -136,87 +154,91 @@ class AutofillAuthActivity : ComponentActivity() {
     }
 
     /**
-     * @return an error message to display, or null on success.
+     * @return an error message to display, or null once the response has been returned.
      *
      * The screen already rendered an `error` slot but nothing ever assigned to it, so a
      * wrong master password made the button appear inert (finding #31).
      */
-    private suspend fun tryUnlock(
+    private suspend fun unlockAndRespond(
         password: String,
         webDomain: String?,
         appPackage: String?,
         usernameIds: List<AutofillId>,
         passwordIds: List<AutofillId>
     ): String? {
-        if (password.isEmpty()) return "Enter your master password"
-
         when (val result = unlockVaultUseCase(password.toCharArray())) {
             UnlockVaultUseCase.Result.Success -> Unit
             is UnlockVaultUseCase.Result.VaultUnreadable -> return result.detail
             UnlockVaultUseCase.Result.WrongPassword -> return "Incorrect master password"
         }
 
-        val credentials = findMatchingCredentials(webDomain, appPackage)
+        val credentials = withContext(Dispatchers.IO) {
+            findMatchingCredentials(webDomain, appPackage)
+        }
         if (credentials.isEmpty()) {
-            // Unlocked, but nothing matches this app or site. Say so rather than
-            // dismissing silently, which looked identical to a failed unlock.
+            // Unlocked, but nothing matches. Say so rather than dismissing silently, which
+            // looked identical to a failed unlock.
             return "Vault unlocked, but no saved credential matches this app or site."
         }
 
-        // Return the first match as the autofill response
-        val credential = credentials.first()
-        val replyIntent = Intent()
-
-        val presentation = RemoteViews(packageName, R.layout.autofill_item).apply {
-            setTextViewText(R.id.autofill_text, "${credential.siteName} — ${credential.username}")
+        val responseBuilder = FillResponse.Builder()
+        var added = 0
+        for (credential in credentials) {
+            val presentation = RemoteViews(packageName, R.layout.autofill_item).apply {
+                setTextViewText(
+                    R.id.autofill_text,
+                    "${credential.displayName} — ${credential.username}"
+                )
+            }
+            val dataset = Dataset.Builder(presentation)
+            var hasValue = false
+            for (id in usernameIds) {
+                dataset.setValue(id, AutofillValue.forText(credential.username))
+                hasValue = true
+            }
+            for (id in passwordIds) {
+                dataset.setValue(id, AutofillValue.forText(credential.password))
+                hasValue = true
+            }
+            if (hasValue) {
+                responseBuilder.addDataset(dataset.build())
+                added++
+            }
         }
 
-        val datasetBuilder = Dataset.Builder(presentation)
-        for (id in usernameIds) {
-            datasetBuilder.setValue(id, AutofillValue.forText(credential.username))
-        }
-        for (id in passwordIds) {
-            datasetBuilder.setValue(id, AutofillValue.forText(credential.password))
-        }
+        if (added == 0) return "Nothing to fill in this form."
 
-        replyIntent.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, datasetBuilder.build())
-        setResult(RESULT_OK, replyIntent)
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(
+                AutofillManager.EXTRA_AUTHENTICATION_RESULT,
+                responseBuilder.build()
+            )
+        )
         finish()
         return null
     }
 
+    /** Goes through the shared matcher — the same rules the unlocked path uses. */
     private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> {
         val key = masterPasswordManager.getSessionKey()
-        return credentialDao.getAllBlocking()
+        val decrypted = credentialDao.getAllBlocking()
             .filter { !it.isDeleted }
             .mapNotNull { entity ->
                 try {
-                    val decrypted = cryptoManager.decrypt(
+                    val plaintext = cryptoManager.decrypt(
                         EncryptedData(entity.encryptedPayload, entity.iv), key
                     )
-                    val json = String(decrypted, Charsets.UTF_8)
-                    decrypted.fill(0)
-                    val obj = JSONObject(json)
-                    Credential(
-                        id = entity.id,
-                        siteName = obj.optString("siteName", ""),
-                        url = obj.optString("url", ""),
-                        username = obj.optString("username", ""),
-                        password = obj.optString("password", "")
+                    val json = String(plaintext, Charsets.UTF_8)
+                    plaintext.fill(0)
+                    CredentialPayloadCodec.decode(
+                        json, entity.id, entity.createdAt, entity.updatedAt, entity.passwordChangedAt
                     )
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Timber.e(e, "Autofill could not decrypt credential %s", entity.id)
                     null
                 }
             }
-            .filter { cred ->
-                val domain = webDomain?.lowercase() ?: ""
-                val pkg = packageName?.lowercase() ?: ""
-                val credUrl = cred.url.lowercase()
-                    .removePrefix("https://").removePrefix("http://").removeSuffix("/")
-                val credSite = cred.siteName.lowercase()
-
-                (domain.isNotEmpty() && (credUrl.contains(domain) || credSite.contains(domain.split(".").first()))) ||
-                (pkg.isNotEmpty() && credSite.split(" ").any { it.length > 2 && pkg.contains(it) })
-            }
+        return CredentialMatcher.match(decrypted, webDomain, packageName)
     }
 }

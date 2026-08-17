@@ -60,11 +60,11 @@ reports true.
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
-| 9 | Autofill classifies email/URI/postal fields as passwords | `autofill/StructureParser.kt:96-107` | open |
-| 10 | Domain matching is suffix-based (`notgoogle.com` matches `google.com`) | `autofill/VaultAutofillService.kt:243-254` | open |
-| 11 | Locked-vault autofill uses looser matching and auto-fills first match | `autofill/AutofillAuthActivity.kt:161-194` | open |
+| 9 | Autofill classifies email/URI/postal fields as passwords | `autofill/StructureParser.kt:96-107` | **fixed** (chunk 8) |
+| 10 | Domain matching is suffix-based (`notgoogle.com` matches `google.com`) | `autofill/VaultAutofillService.kt:243-254` | **fixed** (chunk 8) |
+| 11 | Locked-vault autofill uses looser matching and auto-fills first match | `autofill/AutofillAuthActivity.kt:161-194` | **fixed** (chunk 8) |
 | 12 | Brute-force backoff caps at 32 s and resets on restart | `unlock/UnlockViewModel.kt:82-98` | open |
-| 13 | `FLAG_SECURE` missing on both autofill activities | `MainActivity.kt:35` only | open |
+| 13 | `FLAG_SECURE` missing on both autofill activities | `MainActivity.kt:35` only | **fixed** (chunk 8) |
 | 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | open |
 | 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | open |
 | 16 | Sign-out claims sync disabled, re-enables it anonymously | `security/GoogleAuthManager.kt:97-101` | open |
@@ -120,8 +120,8 @@ Full analysis in [SYNC.md](SYNC.md).
 | 31 | Wrong password in autofill unlock gives zero feedback | `autofill/AutofillAuthActivity.kt:128-131` | **fixed** (chunk 3) |
 | 32 | Biometric failure/cancel is silent | `unlock/UnlockViewModel.kt:73-80` | **fixed** (chunk 3) |
 | 33 | Generator cannot return a password to Add/Edit | `NavGraph.kt:80`, `AddEditScreen.kt:50` | open |
-| 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | open |
-| 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | open |
+| 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8) |
+| 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | **fixed** (chunk 8) |
 | 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | open |
 | 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | open |
 | 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | **fixed** (chunk 3) |

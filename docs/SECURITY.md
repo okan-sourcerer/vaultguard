@@ -163,8 +163,9 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
 | --- | --- |
 | Offline extraction of `vault.db` | SQLCipher + per-payload AES-GCM; payloads need the master password |
 | Device thief with an unlocked phone | Auto-lock timeout, master password / biometric gate on the vault |
-| Screenshots, recents thumbnail | `FLAG_SECURE` on `MainActivity` — **not** on the autofill activities (#13) |
+| Screenshots, recents thumbnail | `FLAG_SECURE` on every activity that shows a password or takes the master password |
 | Clipboard scraping | Sensitive-clip flag, WorkManager clear after 30 s (#36 — clears indiscriminately) |
+| Lookalike domains and hostile package names in autofill | One matcher for both paths; hosts compared on dot boundaries, packages by explicit link or reverse-DNS derivation |
 | Password reuse against known breaches | HIBP k-anonymity range query; only a 5-char SHA-1 prefix is sent |
 | Cloud provider reading the vault | Only ciphertext and IVs reach Firestore; the salt is stored but useless alone |
 | Brute-forcing the master password offline | Argon2id at 64 MiB makes GPU attack expensive |
@@ -179,8 +180,6 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
   This is intentional but is currently *undisclosed to the user* (#39).
 - **Online brute force of the unlock screen.** The current backoff caps at 32 seconds and
   resets on process restart (#12).
-- **A hostile app impersonating a site for autofill.** The current matchers are too loose
-  and the locked-vault path auto-fills the first match (#10, #11).
 - **Traffic analysis of HIBP queries.** The prefix reveals a 1-in-~16 bucket of the hash.
 
 ### Known live weaknesses

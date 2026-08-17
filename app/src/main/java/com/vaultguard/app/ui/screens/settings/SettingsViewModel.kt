@@ -8,6 +8,7 @@ import android.view.autofill.AutofillManager
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vaultguard.app.autofill.AutofillDismissedPrefs
 import com.vaultguard.app.data.remote.FirebaseSyncService
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.domain.usecase.ChangeMasterPasswordUseCase
@@ -43,6 +44,7 @@ data class SettingsUiState(
     val biometricAvailable: Boolean = false,
     val biometricEnabled: Boolean = false,
     val autofillEnabled: Boolean = false,
+    val dismissedSavePrompts: Int = 0,
     val autofillSupported: Boolean = false,
     val isSignedInWithGoogle: Boolean = false,
     val googleEmail: String? = null,
@@ -66,7 +68,8 @@ class SettingsViewModel @Inject constructor(
     private val exportCleartextVaultUseCase: ExportCleartextVaultUseCase,
     private val changeMasterPasswordUseCase: ChangeMasterPasswordUseCase,
     private val googleAuthManager: GoogleAuthManager,
-    private val syncService: FirebaseSyncService
+    private val syncService: FirebaseSyncService,
+    private val dismissedPrefs: AutofillDismissedPrefs
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -128,6 +131,7 @@ class SettingsViewModel @Inject constructor(
             biometricEnabled = bioEnabled,
             autofillSupported = autofillManager?.isAutofillSupported == true,
             autofillEnabled = autofillManager?.hasEnabledAutofillServices() == true,
+            dismissedSavePrompts = dismissedPrefs.dismissedCount,
             isSignedInWithGoogle = googleAuthManager.isSignedInWithGoogle,
             googleEmail = googleAuthManager.currentUserEmail,
             googleDisplayName = googleAuthManager.currentUserDisplayName
@@ -350,6 +354,16 @@ class SettingsViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /** Finding #34 — "Skip" used to be permanent with no way back. */
+    fun onClearDismissedSavePrompts() {
+        val cleared = dismissedPrefs.clearAll()
+        _uiState.value = _uiState.value.copy(
+            dismissedSavePrompts = 0,
+            message = if (cleared == 0) "No dismissed prompts to clear"
+            else "VaultGuard will offer to save on $cleared site(s) again"
+        )
     }
 
     fun clearMessage() {

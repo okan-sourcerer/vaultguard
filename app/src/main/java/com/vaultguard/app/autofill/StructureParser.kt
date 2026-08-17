@@ -1,8 +1,6 @@
 package com.vaultguard.app.autofill
 
 import android.app.assist.AssistStructure
-import android.os.Build
-import android.text.InputType
 import android.view.View
 import android.view.autofill.AutofillId
 
@@ -52,78 +50,27 @@ class StructureParser(private val structure: AssistStructure) {
         }
     }
 
+    /**
+     * Adapts a `ViewNode` into plain values and defers to [FieldClassifier], which is
+     * testable on the host JVM — a `ViewNode` cannot be constructed in a unit test, and
+     * classification is the part where being wrong types a password into the wrong box.
+     */
     private fun classifyField(node: AssistStructure.ViewNode): FieldType {
-        // Check autofill hints first (most reliable)
-        node.autofillHints?.forEach { hint ->
-            when (hint.lowercase()) {
-                View.AUTOFILL_HINT_PASSWORD,
-                "password",
-                "current-password",
-                "new-password" -> return FieldType.PASSWORD
-
-                View.AUTOFILL_HINT_USERNAME,
-                View.AUTOFILL_HINT_EMAIL_ADDRESS,
-                "username",
-                "email",
-                "login" -> return FieldType.USERNAME
+        val htmlAttributes = node.htmlInfo?.attributes
+            ?.mapNotNull { pair ->
+                val name = pair.first ?: return@mapNotNull null
+                val value = pair.second ?: return@mapNotNull null
+                name to value
             }
-        }
+            .orEmpty()
 
-        // Fall back to HTML attributes for web content
-        node.htmlInfo?.let { html ->
-            html.attributes?.forEach { pair ->
-                val attrName = pair.first?.lowercase() ?: return@forEach
-                val attrValue = pair.second?.lowercase() ?: return@forEach
-                if (attrName == "type") {
-                    when (attrValue) {
-                        "password" -> return FieldType.PASSWORD
-                        "email", "text" -> {
-                            val name = getHtmlAttr(html, "name") ?: getHtmlAttr(html, "id") ?: ""
-                            if (name.containsAny("user", "email", "login", "account")) return FieldType.USERNAME
-                        }
-                    }
-                }
-                if (attrName == "autocomplete") {
-                    when {
-                        attrValue.contains("password") -> return FieldType.PASSWORD
-                        attrValue.contains("username") || attrValue.contains("email") -> return FieldType.USERNAME
-                    }
-                }
-            }
-        }
-
-        // Fall back to input type flags
-        val inputType = node.inputType
-        if (inputType and InputType.TYPE_TEXT_VARIATION_PASSWORD != 0 ||
-            inputType and InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD != 0 ||
-            inputType and InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD != 0
-        ) {
-            return FieldType.PASSWORD
-        }
-        if (inputType and InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS != 0 ||
-            inputType and InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS != 0
-        ) {
-            return FieldType.USERNAME
-        }
-
-        // Fall back to hint text and resource ID
-        val hintText = node.hint?.lowercase() ?: ""
-        val idEntry = node.idEntry?.lowercase() ?: ""
-        val combined = "$hintText $idEntry"
-
-        if (combined.containsAny("password", "passwd", "pass")) return FieldType.PASSWORD
-        if (combined.containsAny("user", "email", "login", "account")) return FieldType.USERNAME
-
-        return FieldType.NONE
+        return FieldClassifier.classify(
+            autofillHints = node.autofillHints?.toList().orEmpty(),
+            htmlAttributes = htmlAttributes,
+            inputType = node.inputType,
+            hintText = node.hint,
+            idEntry = node.idEntry
+        )
     }
 
-    private fun getHtmlAttr(html: android.view.ViewStructure.HtmlInfo, name: String): String? {
-        return html.attributes?.firstOrNull { it.first?.lowercase() == name }?.second
-    }
-
-    private fun String.containsAny(vararg keywords: String): Boolean {
-        return keywords.any { this.contains(it) }
-    }
-
-    private enum class FieldType { USERNAME, PASSWORD, NONE }
 }

@@ -16,6 +16,7 @@ import android.view.autofill.AutofillValue
 import android.widget.RemoteViews
 import com.vaultguard.app.R
 import com.vaultguard.app.data.local.db.dao.CredentialDao
+import com.vaultguard.app.data.repository.CredentialPayloadCodec
 import com.vaultguard.app.domain.model.Credential
 import com.vaultguard.app.security.CryptoManager
 import com.vaultguard.app.security.EncryptedData
@@ -24,7 +25,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import timber.log.Timber
 import javax.inject.Inject
 
@@ -56,7 +56,10 @@ class VaultAutofillService : AutofillService() {
             return
         }
 
-        // If vault is locked, present an auth intent
+        // If the vault is locked, authenticate the whole response rather than a single
+        // placeholder dataset. Dataset-level auth forced the unlock activity to answer
+        // with exactly one credential, which is why it picked the first match with no
+        // user choice (finding #11). Response-level auth lets it return every match.
         if (!masterPasswordManager.isVaultUnlocked) {
             val authIntent = Intent(this, AutofillAuthActivity::class.java).apply {
                 putExtra(AutofillAuthActivity.EXTRA_WEB_DOMAIN, parsed.webDomain)
@@ -81,14 +84,11 @@ class VaultAutofillService : AutofillService() {
             }
 
             val responseBuilder = FillResponse.Builder()
-            val datasetBuilder = Dataset.Builder(presentation)
-
-            // Set a placeholder value so the dataset is valid
-            val targetId = parsed.usernameFields.firstOrNull() ?: parsed.passwordFields.first()
-            datasetBuilder.setValue(targetId, null)
-            datasetBuilder.setAuthentication(pendingIntent.intentSender)
-
-            responseBuilder.addDataset(datasetBuilder.build())
+            responseBuilder.setAuthentication(
+                (parsed.usernameFields + parsed.passwordFields).toTypedArray(),
+                pendingIntent.intentSender,
+                presentation
+            )
             addSaveInfo(responseBuilder, parsed)
             callback.onSuccess(responseBuilder.build())
             return
@@ -175,97 +175,36 @@ class VaultAutofillService : AutofillService() {
         }
     }
 
+    /**
+     * Decrypts the vault and asks [CredentialMatcher] which entries may be offered.
+     *
+     * Matching used to live here *and* in AutofillAuthActivity, in two implementations
+     * that had drifted apart — with the looser one guarding the locked-vault path
+     * (finding #11). There is now one.
+     */
     private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> {
         if (!masterPasswordManager.isVaultUnlocked) return emptyList()
 
         val key = masterPasswordManager.getSessionKey()
-        val allEntities = credentialDao.getAllBlocking()
-
-        return allEntities
+        val decrypted = credentialDao.getAllBlocking()
             .filter { !it.isDeleted }
             .mapNotNull { entity ->
                 try {
-                    val decrypted = cryptoManager.decrypt(
+                    val plaintext = cryptoManager.decrypt(
                         EncryptedData(entity.encryptedPayload, entity.iv), key
                     )
-                    val json = String(decrypted, Charsets.UTF_8)
-                    decrypted.fill(0)
-                    val obj = JSONObject(json)
-                    val linkedPackages = mutableListOf<String>()
-                    val linkedDomains = mutableListOf<String>()
-                    obj.optJSONArray("linkedPackages")?.let { arr ->
-                        for (i in 0 until arr.length()) linkedPackages.add(arr.getString(i))
-                    }
-                    obj.optJSONArray("linkedDomains")?.let { arr ->
-                        for (i in 0 until arr.length()) linkedDomains.add(arr.getString(i))
-                    }
-                    val credential = Credential(
-                        id = entity.id,
-                        siteName = obj.optString("siteName", ""),
-                        url = obj.optString("url", ""),
-                        username = obj.optString("username", ""),
-                        password = obj.optString("password", ""),
-                        linkedPackages = linkedPackages,
-                        linkedDomains = linkedDomains
+                    val json = String(plaintext, Charsets.UTF_8)
+                    plaintext.fill(0)
+                    CredentialPayloadCodec.decode(
+                        json, entity.id, entity.createdAt, entity.updatedAt, entity.passwordChangedAt
                     )
-                    credential
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    Timber.e(e, "Autofill could not decrypt credential %s", entity.id)
                     null
                 }
             }
-            .let { allDecrypted ->
-                // Tier 1: exact linked domain/package matches
-                val exact = allDecrypted.filter { cred ->
-                    exactMatchesDomain(cred, webDomain) || exactMatchesPackage(cred, packageName)
-                }
-                if (exact.isNotEmpty()) return@let exact
 
-                // Tier 2: URL-based matches
-                val urlMatches = allDecrypted.filter { cred ->
-                    fuzzyMatchesDomain(cred, webDomain) || fuzzyMatchesPackage(cred, packageName)
-                }
-                urlMatches
-            }
-    }
-
-    private fun exactMatchesDomain(credential: Credential, webDomain: String?): Boolean {
-        if (webDomain.isNullOrBlank()) return false
-        val domain = webDomain.lowercase()
-        // Linked domains
-        if (credential.linkedDomains.any { it.lowercase() == domain }) return true
-        // URL host exact match
-        val credHost = credential.url.lowercase()
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .split("/").firstOrNull() ?: ""
-        return credHost.isNotEmpty() && credHost == domain
-    }
-
-    private fun exactMatchesPackage(credential: Credential, packageName: String?): Boolean {
-        if (packageName.isNullOrBlank()) return false
-        return credential.linkedPackages.any { it.lowercase() == packageName.lowercase() }
-    }
-
-    private fun fuzzyMatchesDomain(credential: Credential, webDomain: String?): Boolean {
-        if (webDomain.isNullOrBlank()) return false
-        val domain = webDomain.lowercase()
-        val credUrl = credential.url.lowercase()
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .removeSuffix("/")
-        if (credUrl.isEmpty()) return false
-        val credHost = credUrl.split("/").firstOrNull() ?: ""
-        // Check if domains share the same base (e.g. accounts.google.com vs google.com)
-        return credHost.isNotEmpty() && (domain.endsWith(credHost) || credHost.endsWith(domain))
-    }
-
-    private fun fuzzyMatchesPackage(credential: Credential, packageName: String?): Boolean {
-        if (packageName.isNullOrBlank()) return false
-        val pkg = packageName.lowercase()
-        val siteName = credential.siteName.lowercase().trim()
-        if (siteName.isEmpty() || siteName.length < 3) return false
-        // Only match if the full site name appears as a segment in the package name
-        return pkg.split(".").any { it == siteName }
+        return CredentialMatcher.match(decrypted, webDomain, packageName)
     }
 
     private fun buildDataset(credential: Credential, parsed: ParsedStructure): Dataset? {

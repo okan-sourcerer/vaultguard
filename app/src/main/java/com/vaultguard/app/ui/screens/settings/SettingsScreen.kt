@@ -363,6 +363,26 @@ fun SettingsScreen(
                 }
             }
 
+                if (uiState.dismissedSavePrompts > 0) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.onClearDismissedSavePrompts() }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Dismissed save prompts", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                "${uiState.dismissedSavePrompts} site(s) where you tapped Skip. " +
+                                    "Tap to offer saving again.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
             // Backup section
             Spacer(modifier = Modifier.height(16.dp))
             Text("Backup", style = MaterialTheme.typography.titleMedium)
