@@ -1,0 +1,234 @@
+package com.vaultguard.app.data.repository
+
+import com.vaultguard.app.data.local.db.dao.CredentialDao
+import com.vaultguard.app.data.local.db.entity.CredentialEntity
+import com.vaultguard.app.domain.model.Credential
+import com.vaultguard.app.domain.repository.CredentialLookup
+import com.vaultguard.app.security.CryptoManager
+import com.vaultguard.app.security.FakeSecurePrefs
+import com.vaultguard.app.security.KeyDerivation
+import com.vaultguard.app.security.MasterPasswordManager
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * Tests for finding #40 — the repository used to drop undecryptable rows with
+ * `mapNotNull { ... catch { null } }`, so a vault nothing could read was indistinguishable
+ * from an empty one.
+ *
+ * The load-bearing assertions here are the ones checking that a failure is *reported*, not
+ * merely that the good rows still come back.
+ */
+class CredentialRepositoryImplTest {
+
+    private val crypto = CryptoManager()
+    private val keyDerivation = KeyDerivation()
+    private val dao = mockk<CredentialDao>()
+
+    private lateinit var masterPasswordManager: MasterPasswordManager
+    private lateinit var repository: CredentialRepositoryImpl
+
+    @Before
+    fun setUp() {
+        masterPasswordManager = MasterPasswordManager(FakeSecurePrefs(), crypto, keyDerivation)
+        masterPasswordManager.setup("master-password".toCharArray())
+        repository = CredentialRepositoryImpl(dao, crypto, masterPasswordManager)
+    }
+
+    private fun entity(id: String, credential: Credential = credential(id)): CredentialEntity {
+        val payload = CredentialPayloadCodec.encode(credential).toByteArray()
+        val encrypted = crypto.encrypt(payload, masterPasswordManager.getSessionKey())
+        return CredentialEntity(
+            id = id,
+            encryptedPayload = encrypted.ciphertext,
+            iv = encrypted.iv,
+            createdAt = 1_000,
+            updatedAt = 2_000
+        )
+    }
+
+    /** A row whose ciphertext cannot be opened with the current key. */
+    private fun corruptEntity(id: String) = entity(id).let {
+        it.copy(encryptedPayload = it.encryptedPayload.copyOf().also { bytes -> bytes[0]++ })
+    }
+
+    private fun credential(id: String, siteName: String = "Site $id") =
+        Credential(id = id, siteName = siteName, username = "user-$id", password = "pw-$id")
+
+    // -- The regression ---------------------------------------------------------------
+
+    @Test
+    fun `a vault where nothing decrypts is not reported as empty`() = runTest {
+        every { dao.getAllCredentials() } returns
+            flowOf(listOf(corruptEntity("a"), corruptEntity("b"), corruptEntity("c")))
+
+        val snapshot = repository.getAllCredentials().first()
+
+        assertTrue(snapshot.items.isEmpty())
+        assertEquals(3, snapshot.undecryptableCount)
+        assertTrue(snapshot.hasUndecryptable)
+        assertFalse("must not look like an empty vault", snapshot.isGenuinelyEmpty)
+    }
+
+    @Test
+    fun `an actually empty vault is reported as genuinely empty`() = runTest {
+        every { dao.getAllCredentials() } returns flowOf(emptyList())
+
+        val snapshot = repository.getAllCredentials().first()
+
+        assertTrue(snapshot.isGenuinelyEmpty)
+        assertFalse(snapshot.hasUndecryptable)
+    }
+
+    @Test
+    fun `readable rows survive alongside unreadable ones`() = runTest {
+        every { dao.getAllCredentials() } returns
+            flowOf(listOf(entity("good-1"), corruptEntity("bad"), entity("good-2")))
+
+        val snapshot = repository.getAllCredentials().first()
+
+        assertEquals(listOf("good-1", "good-2"), snapshot.items.map { it.id })
+        assertEquals(listOf("bad"), snapshot.undecryptableIds)
+    }
+
+    @Test
+    fun `summaries report failures too`() = runTest {
+        every { dao.getAllCredentials() } returns flowOf(listOf(entity("good"), corruptEntity("bad")))
+
+        val snapshot = repository.getAllSummaries().first()
+
+        assertEquals(listOf("good"), snapshot.items.map { it.id })
+        assertEquals(1, snapshot.undecryptableCount)
+    }
+
+    // -- Locked is not the same as damaged ---------------------------------------------
+
+    @Test
+    fun `a locked vault reports locked rather than a pile of failures`() = runTest {
+        every { dao.getAllCredentials() } returns flowOf(listOf(entity("a"), entity("b")))
+        masterPasswordManager.lockVault()
+
+        val snapshot = repository.getAllCredentials().first()
+
+        assertTrue(snapshot.isLocked)
+        assertTrue(snapshot.items.isEmpty())
+        assertFalse("locking is expected, not damage", snapshot.hasUndecryptable)
+        assertFalse(snapshot.isGenuinelyEmpty)
+    }
+
+    @Test
+    fun `a locked vault reports locked from getById`() = runTest {
+        masterPasswordManager.lockVault()
+
+        assertEquals(CredentialLookup.Locked, repository.getById("anything"))
+    }
+
+    // -- Single lookups -----------------------------------------------------------------
+
+    @Test
+    fun `getById returns the credential when it decrypts`() = runTest {
+        coEvery { dao.getById("a") } returns entity("a", credential("a", siteName = "GitHub"))
+
+        val lookup = repository.getById("a")
+
+        assertTrue(lookup is CredentialLookup.Found)
+        assertEquals("GitHub", (lookup as CredentialLookup.Found).credential.siteName)
+    }
+
+    @Test
+    fun `getById distinguishes missing from unreadable`() = runTest {
+        coEvery { dao.getById("missing") } returns null
+        coEvery { dao.getById("corrupt") } returns corruptEntity("corrupt")
+
+        assertEquals(CredentialLookup.NotFound, repository.getById("missing"))
+
+        val corrupt = repository.getById("corrupt")
+        assertTrue(corrupt is CredentialLookup.Undecryptable)
+        assertEquals("corrupt", (corrupt as CredentialLookup.Undecryptable).id)
+    }
+
+    @Test
+    fun `getById treats a soft-deleted row as missing`() = runTest {
+        coEvery { dao.getById("gone") } returns entity("gone").copy(isDeleted = true)
+
+        assertEquals(CredentialLookup.NotFound, repository.getById("gone"))
+    }
+
+    // -- Round-trip through save --------------------------------------------------------
+
+    @Test
+    fun `a saved credential decrypts back to the same values`() = runTest {
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById(any()) } returns null
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        val source = Credential(
+            id = "round-trip",
+            siteName = "GitHub",
+            username = "okan",
+            password = """tricky",\password""",
+            notes = "line one\nline two",
+            tags = listOf("work", "2fa")
+        )
+        repository.save(source)
+
+        every { dao.getAllCredentials() } returns flowOf(stored)
+        val restored = repository.getAllCredentials().first().items.single()
+
+        assertEquals(source.siteName, restored.siteName)
+        assertEquals(source.password, restored.password)
+        assertEquals(source.notes, restored.notes)
+        assertEquals(source.tags, restored.tags)
+    }
+
+    // -- Search ---------------------------------------------------------------------------
+
+    @Test
+    fun `search matches on site name and username`() = runTest {
+        coEvery { dao.getAll() } returns listOf(
+            entity("a", credential("a", siteName = "GitHub")),
+            entity("b", credential("b", siteName = "Gitlab")),
+            entity("c", credential("c", siteName = "Amazon"))
+        )
+
+        val results = repository.search("git")
+
+        assertEquals(setOf("a", "b"), results.items.map { it.id }.toSet())
+    }
+
+    @Test
+    fun `search still reports rows it could not read`() = runTest {
+        // A row that cannot be decrypted cannot be excluded by a search term either.
+        // Filtering it away silently would recreate finding #40 in a narrower form.
+        coEvery { dao.getAll() } returns listOf(
+            entity("a", credential("a", siteName = "GitHub")),
+            corruptEntity("bad")
+        )
+
+        val results = repository.search("nothing-matches-this")
+
+        assertTrue(results.items.isEmpty())
+        assertEquals(1, results.undecryptableCount)
+    }
+
+    // -- Snapshot semantics -----------------------------------------------------------------
+
+    @Test
+    fun `mapping a snapshot preserves the failure list`() = runTest {
+        every { dao.getAllCredentials() } returns flowOf(listOf(entity("good"), corruptEntity("bad")))
+
+        val mapped = repository.getAllCredentials().first().map { it.siteName }
+
+        assertEquals(listOf("Site good"), mapped.items)
+        assertEquals(listOf("bad"), mapped.undecryptableIds)
+    }
+}

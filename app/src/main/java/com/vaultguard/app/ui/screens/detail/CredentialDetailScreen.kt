@@ -110,6 +110,47 @@ fun CredentialDetailScreen(
     ) { innerPadding ->
         val credential = uiState.credential
 
+        // Previously this composed nothing at all when the credential was null, so a
+        // missing or unreadable row rendered as a blank page (finding #38).
+        uiState.unavailable?.let { reason ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = when (reason) {
+                        DetailUiState.Unavailable.NOT_FOUND -> "This credential no longer exists."
+                        DetailUiState.Unavailable.LOCKED -> "The vault is locked."
+                        DetailUiState.Unavailable.UNDECRYPTABLE ->
+                            "This credential could not be decrypted."
+                    },
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (reason == DetailUiState.Unavailable.UNDECRYPTABLE) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "The entry is still stored on this device but cannot be read " +
+                            "with the current key. Do not delete it — export a backup and " +
+                            "check whether your master password recently changed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    uiState.error?.let {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(onClick = onNavigateBack) { Text("Back") }
+            }
+        }
+
         if (credential != null) {
             Column(
                 modifier = Modifier

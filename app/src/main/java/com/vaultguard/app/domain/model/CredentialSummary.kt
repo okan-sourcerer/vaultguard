@@ -1,8 +1,12 @@
 package com.vaultguard.app.domain.model
 
 /**
- * Lightweight credential for list display — password is intentionally excluded
- * so it never sits in memory while browsing the vault.
+ * Lightweight credential for list display — the password is intentionally excluded, so
+ * browsing the vault does not hold every password in memory at once.
+ *
+ * Note the limit of that claim: the detail screen loads a full [Credential] and keeps its
+ * plaintext password in UI state for as long as it is open. This type narrows the exposure
+ * to one credential at a time; it does not eliminate it.
  */
 data class CredentialSummary(
     val id: String,

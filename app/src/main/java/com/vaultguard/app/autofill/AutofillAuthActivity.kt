@@ -94,7 +94,7 @@ class AutofillAuthActivity : ComponentActivity() {
                                 autoCorrectEnabled = false
                             ),
                             keyboardActions = KeyboardActions(onDone = {
-                                tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
+                                error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
                             }),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -107,7 +107,10 @@ class AutofillAuthActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Button(
-                            onClick = { tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds) },
+                            onClick = {
+                                error = tryUnlock(password, webDomain, appPackage, usernameIds, passwordIds)
+                            },
+                            enabled = password.isNotEmpty(),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Unlock & Fill")
@@ -118,23 +121,31 @@ class AutofillAuthActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * @return an error message to display, or null on success.
+     *
+     * The screen already rendered an `error` slot but nothing ever assigned to it, so a
+     * wrong master password made the button appear inert (finding #31).
+     */
     private fun tryUnlock(
         password: String,
         webDomain: String?,
         appPackage: String?,
         usernameIds: List<AutofillId>,
         passwordIds: List<AutofillId>
-    ) {
+    ): String? {
+        if (password.isEmpty()) return "Enter your master password"
+
         val success = masterPasswordManager.unlock(password.toCharArray())
         if (!success) {
-            return
+            return "Incorrect master password"
         }
 
         val credentials = findMatchingCredentials(webDomain, appPackage)
         if (credentials.isEmpty()) {
-            setResult(RESULT_CANCELED)
-            finish()
-            return
+            // Unlocked, but nothing matches this app or site. Say so rather than
+            // dismissing silently, which looked identical to a failed unlock.
+            return "Vault unlocked, but no saved credential matches this app or site."
         }
 
         // Return the first match as the autofill response
@@ -156,6 +167,7 @@ class AutofillAuthActivity : ComponentActivity() {
         replyIntent.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, datasetBuilder.build())
         setResult(RESULT_OK, replyIntent)
         finish()
+        return null
     }
 
     private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> {

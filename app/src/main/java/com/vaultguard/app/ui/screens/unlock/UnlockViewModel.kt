@@ -72,9 +72,30 @@ class UnlockViewModel @Inject constructor(
 
     fun onBiometricUnlock(activity: FragmentActivity) {
         biometricAuthManager.authenticateAndUnwrapKey(activity) { vaultKey ->
-            if (vaultKey != null) {
-                masterPasswordManager.unlockWithKey(vaultKey)
-                _uiState.value = _uiState.value.copy(isUnlocked = true)
+            when {
+                // Cancellation and hardware failure both arrive as null. Saying nothing
+                // left the user tapping a fingerprint icon that appeared to do nothing
+                // (finding #32).
+                vaultKey == null -> _uiState.value = _uiState.value.copy(
+                    error = "Biometric unlock failed or was cancelled. " +
+                        "Enter your master password instead."
+                )
+
+                // The unwrapped key does not open the vault. The realistic cause is a
+                // master password change, which leaves the wrapped copy stale
+                // (finding #6). Accepting it would unlock into an empty-looking vault,
+                // which is what finding #7 allowed.
+                !masterPasswordManager.unlockWithKey(vaultKey) -> {
+                    biometricAuthManager.disableBiometric()
+                    _uiState.value = _uiState.value.copy(
+                        biometricAvailable = false,
+                        error = "Biometric unlock is out of date — most likely your master " +
+                            "password changed. It has been turned off. Unlock with your " +
+                            "master password, then re-enable it in Settings."
+                    )
+                }
+
+                else -> _uiState.value = _uiState.value.copy(isUnlocked = true, error = null)
             }
         }
     }

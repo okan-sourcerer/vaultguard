@@ -2,8 +2,8 @@ package com.vaultguard.app.ui.screens.vault
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vaultguard.app.domain.model.Credential
 import com.vaultguard.app.domain.model.CredentialSummary
+import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.data.remote.FirebaseSyncService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,7 +31,12 @@ data class VaultUiState(
     val availableCategories: List<String> = emptyList(),
     val isLoading: Boolean = false,
     val isSyncing: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    /**
+     * Rows present in the database that could not be decrypted (finding #40).
+     * Non-zero means real trouble and must never be rendered as an empty vault.
+     */
+    val undecryptableCount: Int = 0
 )
 
 @HiltViewModel
@@ -41,6 +46,7 @@ class VaultViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val allCredentials = MutableStateFlow<List<CredentialSummary>>(emptyList())
+    private val undecryptableCount = MutableStateFlow(0)
     private val searchQuery = MutableStateFlow("")
     private val sortMode = MutableStateFlow(SortMode.NAME_ASC)
     private val filterCategory = MutableStateFlow<String?>(null)
@@ -50,8 +56,8 @@ class VaultViewModel @Inject constructor(
 
     val uiState: StateFlow<VaultUiState> = combine(
         allCredentials, searchQuery, sortMode, filterCategory,
-        combine(isLoading, isSyncing, error) { l, s, e -> Triple(l, s, e) }
-    ) { creds, query, sort, category, (loading, syncing, err) ->
+        combine(isLoading, isSyncing, error, undecryptableCount) { l, s, e, u -> Quad(l, s, e, u) }
+    ) { creds, query, sort, category, (loading, syncing, err, undecryptable) ->
         val filtered = filterAndSort(creds, query, sort, category)
         val categories = creds.map { it.category }.filter { it.isNotEmpty() }.distinct().sorted()
         VaultUiState(
@@ -62,9 +68,12 @@ class VaultViewModel @Inject constructor(
             availableCategories = categories,
             isLoading = loading,
             isSyncing = syncing,
-            error = err
+            error = err,
+            undecryptableCount = undecryptable
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), VaultUiState(isLoading = true))
+
+    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
     init {
         loadCredentials()
@@ -78,8 +87,9 @@ class VaultViewModel @Inject constructor(
                     isLoading.value = false
                     error.value = e.message
                 }
-                .collect { summaries ->
-                    allCredentials.value = summaries
+                .collect { snapshot ->
+                    allCredentials.value = snapshot.items
+                    undecryptableCount.value = snapshot.undecryptableCount
                     isLoading.value = false
                 }
         }
@@ -131,9 +141,22 @@ class VaultViewModel @Inject constructor(
 
     fun onTogglePin(summary: CredentialSummary) {
         viewModelScope.launch {
-            val credential = credentialRepository.getById(summary.id) ?: return@launch
-            credentialRepository.save(credential.copy(isPinned = !credential.isPinned))
+            when (val lookup = credentialRepository.getById(summary.id)) {
+                is CredentialLookup.Found ->
+                    credentialRepository.save(
+                        lookup.credential.copy(isPinned = !lookup.credential.isPinned)
+                    )
+                is CredentialLookup.Undecryptable ->
+                    error.value = "Could not read “${summary.displayName}” to pin it."
+                CredentialLookup.NotFound ->
+                    error.value = "“${summary.displayName}” no longer exists."
+                CredentialLookup.Locked -> Unit // the lock event navigates away on its own
+            }
         }
+    }
+
+    fun onDismissError() {
+        error.value = null
     }
 
     fun onSync() {

@@ -461,6 +461,13 @@ fun SettingsScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     StatRow("Total entries", "${stats.totalEntries}")
+                    if (stats.undecryptableEntries > 0) {
+                        StatRow(
+                            "Entries that could not be decrypted",
+                            "${stats.undecryptableEntries}",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     if (stats.weakPasswords > 0) {
                         StatRow(
                             "Weak passwords",

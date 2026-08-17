@@ -23,7 +23,10 @@ class BiometricAuthManager @Inject constructor(
     private val TAG = "BiometricAuth"
 
     companion object {
-        private const val PREFS_NAME = "biometric_prefs"
+        /** Frozen — see docs/SECURITY.md. */
+        const val PREFS_NAME = "biometric_prefs"
+        const val BIOMETRIC_PREFS = "biometric_prefs_qualifier"
+
         private const val KEY_WRAPPED_KEY = "wrapped_vault_key"
         private const val KEY_WRAPPED_IV = "wrapped_vault_iv"
     }

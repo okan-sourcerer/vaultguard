@@ -27,15 +27,23 @@ class ExportCleartextVaultUseCase @Inject constructor(
 ) {
     /** @return the number of credentials written. */
     suspend operator fun invoke(uri: Uri): Int = withContext(Dispatchers.Default) {
-        val credentials = credentialRepository.getAllCredentials().first()
+        val snapshot = credentialRepository.getAllCredentials().first()
 
-        // Fail loudly rather than silently writing an empty file. A zero-row export from a
-        // non-empty vault means decryption failed, which is finding #40 — and writing a
-        // reassuring empty CSV is precisely how that bug hides real damage.
-        check(credentials.isNotEmpty()) {
-            "Refusing to export an empty vault. Either the vault is genuinely empty, or " +
-                "it is locked or unreadable — check before trusting this as a backup."
+        // Refuse to produce a backup that silently omits entries. Both checks exist
+        // because a reassuring-looking CSV is the worst possible failure mode here: the
+        // user would delete their other copies on the strength of it.
+        check(!snapshot.isLocked) { "The vault is locked. Unlock it before exporting." }
+        check(!snapshot.hasUndecryptable) {
+            "Refusing to export: ${snapshot.undecryptableCount} of " +
+                "${snapshot.items.size + snapshot.undecryptableCount} entries could not be " +
+                "decrypted, so this backup would be incomplete. Resolve that first."
         }
+        check(snapshot.items.isNotEmpty()) {
+            "Refusing to export an empty vault. Either it is genuinely empty, or it is " +
+                "unreadable — check before trusting this as a backup."
+        }
+
+        val credentials = snapshot.items
 
         val csv = CleartextCsv.write(credentials)
 

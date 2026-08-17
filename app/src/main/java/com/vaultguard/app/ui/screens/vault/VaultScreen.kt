@@ -29,6 +29,7 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -178,6 +179,57 @@ fun VaultScreen(
                 }
             }
 
+            // Undecryptable rows are damage, not absence. Surfacing this is the whole
+            // point of finding #40 — the previous code dropped such rows silently, so a
+            // vault nothing could read looked exactly like a vault with nothing in it.
+            if (uiState.undecryptableCount > 0) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "${uiState.undecryptableCount} " +
+                                if (uiState.undecryptableCount == 1) "entry could not be decrypted"
+                                else "entries could not be decrypted",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "They are still stored on this device but cannot be read " +
+                                "with the current key. Do not delete anything or change your " +
+                                "master password until this is resolved.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+
+            uiState.error?.let { message ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clickable { viewModel.onDismissError() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+
             // Content
             PullToRefreshBox(
                 isRefreshing = uiState.isSyncing,
@@ -196,10 +248,15 @@ fun VaultScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (uiState.searchQuery.isNotEmpty() || uiState.filterCategory != null)
-                                "No matching credentials."
-                            else
-                                "No credentials yet.\nTap + to add one.",
+                            text = when {
+                                uiState.searchQuery.isNotEmpty() || uiState.filterCategory != null ->
+                                    "No matching credentials."
+                                // Never claim the vault is empty when rows exist but
+                                // could not be read (finding #40).
+                                uiState.undecryptableCount > 0 ->
+                                    "Nothing readable to show.\nSee the warning above."
+                                else -> "No credentials yet.\nTap + to add one."
+                            },
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

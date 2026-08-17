@@ -31,7 +31,9 @@ data class VaultStats(
     val weakPasswords: Int = 0,
     val duplicatePasswords: Int = 0,
     val oldPasswords: Int = 0,
-    val categoryCounts: Map<String, Int> = emptyMap()
+    val categoryCounts: Map<String, Int> = emptyMap(),
+    /** Rows that exist but could not be decrypted (finding #40). */
+    val undecryptableEntries: Int = 0
 )
 
 data class SettingsUiState(
@@ -75,7 +77,8 @@ class SettingsViewModel @Inject constructor(
 
     private fun loadVaultStats() {
         viewModelScope.launch {
-            credentialRepository.getAllCredentials().collect { credentials ->
+            credentialRepository.getAllCredentials().collect { snapshot ->
+                val credentials = snapshot.items
                 val now = System.currentTimeMillis()
                 val ninetyDaysMs = 90L * 24 * 60 * 60 * 1000
 
@@ -104,7 +107,8 @@ class SettingsViewModel @Inject constructor(
                         weakPasswords = weakPasswords,
                         duplicatePasswords = duplicatePasswords,
                         oldPasswords = oldPasswords,
-                        categoryCounts = categoryCounts
+                        categoryCounts = categoryCounts,
+                        undecryptableEntries = snapshot.undecryptableCount
                     )
                 )
             }

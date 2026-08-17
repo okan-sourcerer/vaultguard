@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.data.repository.PasswordPresetRepository
 import com.vaultguard.app.domain.model.Credential
 import com.vaultguard.app.domain.model.PasswordPreset
+import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.domain.usecase.GeneratePasswordUseCase
 import com.vaultguard.app.util.PasswordStrength
@@ -36,6 +37,8 @@ data class AddEditUiState(
     val isEditing: Boolean = false,
     val isLoading: Boolean = false,
     val isSaved: Boolean = false,
+    /** The row is missing, locked or unreadable — saving would overwrite it (#38). */
+    val isUnavailable: Boolean = false,
     val error: String? = null
 )
 
@@ -69,23 +72,45 @@ class AddEditViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                val credential = credentialRepository.getById(id)
-                if (credential != null) {
-                    _uiState.value = AddEditUiState(
-                        id = credential.id,
-                        siteName = credential.siteName,
-                        appName = credential.appName,
-                        url = credential.url,
-                        username = credential.username,
-                        password = credential.password,
-                        notes = credential.notes,
-                        category = credential.category,
-                        tags = credential.tags.joinToString(", "),
-                        isPinned = credential.isPinned,
-                        createdAt = credential.createdAt,
-                        strength = strengthEvaluator(credential.password),
-                        isEditing = true,
-                        isLoading = false
+                when (val lookup = credentialRepository.getById(id)) {
+                    is CredentialLookup.Found -> {
+                        val credential = lookup.credential
+                        _uiState.value = AddEditUiState(
+                            id = credential.id,
+                            siteName = credential.siteName,
+                            appName = credential.appName,
+                            url = credential.url,
+                            username = credential.username,
+                            password = credential.password,
+                            notes = credential.notes,
+                            category = credential.category,
+                            tags = credential.tags.joinToString(", "),
+                            isPinned = credential.isPinned,
+                            createdAt = credential.createdAt,
+                            strength = strengthEvaluator(credential.password),
+                            presets = _uiState.value.presets,
+                            isEditing = true,
+                            isLoading = false
+                        )
+                    }
+                    // Every branch below must clear isLoading. The previous code only
+                    // handled the found case, so a missing row left the screen spinning
+                    // forever (finding #38).
+                    is CredentialLookup.Undecryptable -> _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isUnavailable = true,
+                        error = "This credential could not be decrypted, so it cannot be " +
+                            "edited. Do not overwrite it — it is still stored on the device."
+                    )
+                    CredentialLookup.NotFound -> _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isUnavailable = true,
+                        error = "This credential no longer exists."
+                    )
+                    CredentialLookup.Locked -> _uiState.value = _uiState.value.copy(
+                        isLoading = false,
+                        isUnavailable = true,
+                        error = "The vault is locked."
                     )
                 }
             } catch (e: Exception) {
@@ -123,6 +148,11 @@ class AddEditViewModel @Inject constructor(
 
     fun onSave() {
         val state = _uiState.value
+        if (state.isUnavailable) {
+            // Saving here would replace a row we could not read with a blank one.
+            _uiState.value = state.copy(error = "This credential cannot be edited.")
+            return
+        }
         if (state.siteName.isBlank()) {
             _uiState.value = state.copy(error = "Site name is required")
             return

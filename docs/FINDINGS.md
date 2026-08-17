@@ -15,7 +15,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open |
 | 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | open |
 | 6 | Password change leaves biometric wrapping the old key | `usecase/ChangeMasterPasswordUseCase.kt` | open |
-| 7 | `unlockWithKey` never validates the key | `security/MasterPasswordManager.kt:96-98` | open |
+| 7 | `unlockWithKey` never validates the key | `security/MasterPasswordManager.kt:96-98` | **fixed** (chunk 3) |
 | 8 | Cancelling biometric enrolment permanently breaks biometric unlock | `security/BiometricAuthManager.kt:49-89` | open |
 
 **#1** — a catch-all `catch (_: Exception)` around a probe-open calls
@@ -108,16 +108,16 @@ Full analysis in [SYNC.md](SYNC.md).
 | 28 | Setup and change-password enforce different rules | `SetupViewModel.kt:52-65` vs `SettingsScreen.kt:517-522` | open |
 | 29 | "Password age" actually means "last edited" | `detail/CredentialDetailScreen.kt:211-251` | open |
 | 30 | Duplicate-password count inflated; empty passwords grouped | `settings/SettingsViewModel.kt:86-89` | open |
-| 31 | Wrong password in autofill unlock gives zero feedback | `autofill/AutofillAuthActivity.kt:128-131` | open |
-| 32 | Biometric failure/cancel is silent | `unlock/UnlockViewModel.kt:73-80` | open |
+| 31 | Wrong password in autofill unlock gives zero feedback | `autofill/AutofillAuthActivity.kt:128-131` | **fixed** (chunk 3) |
+| 32 | Biometric failure/cancel is silent | `unlock/UnlockViewModel.kt:73-80` | **fixed** (chunk 3) |
 | 33 | Generator cannot return a password to Add/Edit | `NavGraph.kt:80`, `AddEditScreen.kt:50` | open |
 | 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | open |
 | 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | open |
 | 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | open |
 | 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | open |
-| 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | open |
+| 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | **fixed** (chunk 3) |
 | 39 | No "forgetting this loses everything" warning at setup | `setup/SetupScreen.kt` | open |
-| 40 | A locked or unreadable vault renders as an empty vault | `data/repository/CredentialRepositoryImpl.kt:83-96` | open |
+| 40 | A locked or unreadable vault renders as an empty vault | `data/repository/CredentialRepositoryImpl.kt:83-96` | **fixed** (chunk 3) |
 
 **#40 is the force multiplier.** `decryptEntity` swallows every exception into `null` and
 `mapNotNull` drops the row. This single catch is why #3, #4, #6, and #7 all present to the
@@ -170,8 +170,8 @@ things the code did not do — these are load-bearing because #1 was justified b
 | Comment | Problem | Status |
 | --- | --- | --- |
 | `DatabaseModule.kt:31-34` "safe because a passphrase mismatch only happens on a fresh install" | False premise behind #1 | **corrected** (chunk 2) |
-| `MasterPasswordManager.kt:35` "Resets on collect" | Resets on explicit `consumeLockEvent()` | to correct |
-| `CredentialSummary.kt:4-6` "password … never sits in memory while browsing" | True for the list, false for the detail screen | to correct |
+| `MasterPasswordManager.kt:35` "Resets on collect" | Resets on explicit `consumeLockEvent()` | **corrected** (chunk 3) |
+| `CredentialSummary.kt:4-6` "password … never sits in memory while browsing" | True for the list, false for the detail screen | **corrected** (chunk 3) |
 | `BreachCheckService.kt:46` "just report unknown" | The type has no unknown state — #14 | to correct with #14 |
 | `FirebaseSyncService.kt:53-60` | Two stacked KDoc blocks; the first describes an obsolete Firestore path | to correct |
 | `res/xml/backup_rules.xml`, `data_extraction_rules.xml` | Unedited templates with real security consequences — #2 | **corrected** (chunk 2) |

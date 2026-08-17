@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.domain.model.Credential
+import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.security.BreachCheckService
 import com.vaultguard.app.security.BreachResult
@@ -19,8 +20,12 @@ data class DetailUiState(
     val isDeleted: Boolean = false,
     val error: String? = null,
     val breachResult: BreachResult? = null,
-    val isCheckingBreach: Boolean = false
-)
+    val isCheckingBreach: Boolean = false,
+    /** Set when the row is gone or unreadable, so the screen can say so (finding #38). */
+    val unavailable: Unavailable? = null
+) {
+    enum class Unavailable { NOT_FOUND, UNDECRYPTABLE, LOCKED }
+}
 
 @HiltViewModel
 class CredentialDetailViewModel @Inject constructor(
@@ -45,8 +50,26 @@ class CredentialDetailViewModel @Inject constructor(
     private fun loadCredential() {
         viewModelScope.launch {
             try {
-                val credential = credentialRepository.getById(credentialId)
-                _uiState.value = DetailUiState(credential = credential, isLoading = false)
+                _uiState.value = when (val lookup = credentialRepository.getById(credentialId)) {
+                    is CredentialLookup.Found ->
+                        DetailUiState(credential = lookup.credential, isLoading = false)
+                    is CredentialLookup.Undecryptable ->
+                        DetailUiState(
+                            isLoading = false,
+                            unavailable = DetailUiState.Unavailable.UNDECRYPTABLE,
+                            error = lookup.detail
+                        )
+                    CredentialLookup.NotFound ->
+                        DetailUiState(
+                            isLoading = false,
+                            unavailable = DetailUiState.Unavailable.NOT_FOUND
+                        )
+                    CredentialLookup.Locked ->
+                        DetailUiState(
+                            isLoading = false,
+                            unavailable = DetailUiState.Unavailable.LOCKED
+                        )
+                }
             } catch (e: Exception) {
                 _uiState.value = DetailUiState(isLoading = false, error = e.message)
             }
