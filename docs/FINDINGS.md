@@ -16,7 +16,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | P3 — business logic and UX (#25–#40) | all fixed |
 | P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
 | P1b — autofill usability (#47–#56) | all fixed |
-| P5 — flow and interaction (#57–#63) | #57 fixed |
+| P5 — flow and interaction (#57–#63) | all fixed |
 
 **Still open**, all deliberate rather than forgotten:
 
@@ -24,14 +24,18 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | --- | --- | --- |
 | 4 (part) | Joining an account that already holds a different vault | The data-loss halves are fixed and a mismatch now refuses rather than merging. Designing the join flow needs a second device |
 | 45 (part) | `GoogleSignIn` → Credential Manager | A different auth flow with its own failure modes. Deserves its own change, not a line in a hygiene pass |
-| 58, 59, 60 | Pin moves the "Updated" date; delete has no undo; Add/Edit loses typed changes on Back | Found by the flow audit of 2026-08-18. Each is a decision about what the app should do, not a correction, so they are worth deciding rather than patching |
+
+Everything else in the catalogue is fixed.
 
 Verified on the owner's device against both the debug and the minified release build:
 vault loads, biometric unlock, autofill in a third-party app, and clipboard clearing.
 
-**Chunk 14 is not yet device-verified.** #50 in particular cannot be believed until it is
-seen: the chip is drawn by the keyboard, in another process, from a Slice this app builds,
-and R8 inlines most of the library that builds it.
+**Chunks 14 and 15 are not yet device-verified.** #50 in particular cannot be believed
+until it is seen: the chip is drawn by the keyboard, in another process, from a Slice this
+app builds, and R8 inlines most of the library that builds it. The chunk 15 work is
+ordinary Compose and carries less platform risk, but the undo snackbar (#59) and the
+discard guard (#60) are both about timing and back-navigation, which is exactly where a
+device disagrees with a test.
 
 ## P0 — Vault destruction / silent data loss
 
@@ -212,12 +216,12 @@ same lines had concluded the opposite.
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
 | 57 | The list can unpin but never pin; pinning needs the edit screen | `ui/screens/vault/VaultScreen.kt:398` | **fixed** (chunk 15) |
-| 58 | Pinning changes the "Updated" date shown on the detail screen | `ui/screens/detail/CredentialDetailScreen.kt:316` | open |
-| 59 | Delete is a soft delete with no restore path and no undo | `ui/screens/detail/CredentialDetailScreen.kt:73` | open |
-| 60 | Add/Edit discards typed changes on Back with no warning | `ui/screens/addEdit/AddEditScreen.kt:79` | open |
-| 61 | Editing a credential silently drops its autofill links | `ui/screens/addEdit/AddEditViewModel.kt:168-180` | open |
-| 62 | Deleting a generator preset is one accidental tap, with no confirmation | `ui/screens/generator/PasswordGeneratorScreen.kt:146` | open |
-| 63 | Auto-lock timeout reads "1 minutes" | `ui/screens/settings/SettingsScreen.kt:248,256` | open |
+| 58 | Pinning changes the "Updated" date shown on the detail screen | `ui/screens/detail/CredentialDetailScreen.kt:316` | **fixed** (chunk 15) |
+| 59 | Delete is a soft delete with no restore path and no undo | `ui/screens/detail/CredentialDetailScreen.kt:73` | **fixed** (chunk 15) |
+| 60 | Add/Edit discards typed changes on Back with no warning | `ui/screens/addEdit/AddEditScreen.kt:79` | **fixed** (chunk 15) |
+| 61 | Editing a credential silently drops its autofill links | `ui/screens/addEdit/AddEditViewModel.kt:168-180` | **fixed** (chunk 15) |
+| 62 | Deleting a generator preset is one accidental tap, with no confirmation | `ui/screens/generator/PasswordGeneratorScreen.kt:146` | **fixed** (chunk 15) |
+| 63 | Auto-lock timeout reads "1 minutes" | `ui/screens/settings/SettingsScreen.kt:248,256` | **fixed** (chunk 15) |
 
 **#57** — the pin `IconButton` rendered only `if (credential.isPinned)`, so the affordance
 existed in one direction. A swipe-right gesture could pin, but its only indication is a
