@@ -314,7 +314,9 @@ fun CredentialDetailScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Updated: ${dateFormat.format(Date(credential.updatedAt))}",
+                    // contentChangedAt, not updatedAt: the latter is the sync clock and
+                    // moves when an entry is merely pinned (finding #58).
+                    text = "Updated: ${dateFormat.format(Date(credential.contentChangedAt))}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -51,7 +51,15 @@ class CredentialRepositoryImpl @Inject constructor(
         // updatedAt > syncedAt, so a backwards clock could otherwise leave an edited row
         // looking already-synced and it would never be uploaded.
         val now = monotonicNow(existing?.updatedAt)
-        val json = CredentialPayloadCodec.encode(credential)
+
+        // Decrypted once and used for both timestamp decisions below. Null for a new entry,
+        // and also for a row that cannot be read — in which case neither timestamp can be
+        // substantiated and both advance.
+        val previous = existing?.let { decrypt(it) as? Decrypted.Success }?.credential
+
+        val json = CredentialPayloadCodec.encode(
+            credential.copy(contentChangedAt = contentChangedAtFor(existing, previous, credential, now))
+        )
         val key = masterPasswordManager.getSessionKey()
         val plaintextBytes = json.toByteArray(Charsets.UTF_8)
         val encrypted = cryptoManager.encrypt(plaintextBytes, key)
@@ -63,7 +71,7 @@ class CredentialRepositoryImpl @Inject constructor(
             iv = encrypted.iv,
             createdAt = existing?.createdAt ?: now,
             updatedAt = now,
-            passwordChangedAt = passwordChangedAtFor(existing, credential.password, now)
+            passwordChangedAt = passwordChangedAtFor(existing, previous, credential.password, now)
         )
         credentialDao.upsert(entity)
     }
@@ -78,21 +86,47 @@ class CredentialRepositoryImpl @Inject constructor(
      */
     private fun passwordChangedAtFor(
         existing: CredentialEntity?,
+        previous: Credential?,
         newPassword: String,
         now: Long
     ): Long {
         if (existing == null) return now
-
-        val previous = decrypt(existing) as? Decrypted.Success
         // An unreadable row cannot be compared. Treat the password as changed rather than
         // carrying forward a timestamp we cannot substantiate.
-            ?: return now
+        if (previous == null) return now
 
-        return if (previous.credential.password == newPassword) {
-            existing.passwordChangedAt
-        } else {
-            now
-        }
+        return if (previous.password == newPassword) existing.passwordChangedAt else now
+    }
+
+    /**
+     * Advances the content-change timestamp only when something about the credential
+     * itself differs (finding #58).
+     *
+     * Pinning is excluded deliberately: it is a preference about where the entry appears
+     * in a list, not a change to the credential, and it was the reason the detail screen
+     * reported entries as updated on days nothing had been edited. The timestamps are
+     * excluded because they are the answer, not an input to it.
+     */
+    private fun contentChangedAtFor(
+        existing: CredentialEntity?,
+        previous: Credential?,
+        updated: Credential,
+        now: Long
+    ): Long {
+        if (existing == null || previous == null) return now
+
+        val unchanged = previous.siteName == updated.siteName &&
+            previous.appName == updated.appName &&
+            previous.url == updated.url &&
+            previous.username == updated.username &&
+            previous.password == updated.password &&
+            previous.notes == updated.notes &&
+            previous.category == updated.category &&
+            previous.tags == updated.tags &&
+            previous.linkedPackages == updated.linkedPackages &&
+            previous.linkedDomains == updated.linkedDomains
+
+        return if (unchanged) previous.contentChangedAt else now
     }
 
     override suspend fun delete(id: String) {

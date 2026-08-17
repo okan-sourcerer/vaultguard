@@ -67,6 +67,17 @@ class CredentialRepositoryImplTest {
     private fun credential(id: String, siteName: String = "Site $id") =
         Credential(id = id, siteName = siteName, username = "user-$id", password = "pw-$id")
 
+    /** contentChangedAt lives in the payload, so reading it back means decrypting (#58). */
+    private fun payloadOf(entity: CredentialEntity): Credential {
+        val plaintext = crypto.decrypt(
+            com.vaultguard.app.security.EncryptedData(entity.encryptedPayload, entity.iv),
+            masterPasswordManager.getSessionKey()
+        )
+        return CredentialPayloadCodec.decode(
+            String(plaintext), entity.id, entity.createdAt, entity.updatedAt, entity.passwordChangedAt
+        )
+    }
+
     // -- The regression ---------------------------------------------------------------
 
     @Test
@@ -203,6 +214,69 @@ class CredentialRepositoryImplTest {
 
         assertEquals(listOf("Site good"), mapped.items)
         assertEquals(listOf("bad"), mapped.undecryptableIds)
+    }
+
+    // -- Finding #58: content age vs row age -----------------------------------------------
+
+    @Test
+    fun `pinning does not count as changing the entry`() = runTest {
+        // The bug: the detail screen read updatedAt, which every write moves, so pinning
+        // reported the credential as updated today.
+        val original = entity("a", credential("a").copy(contentChangedAt = 1_000))
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("a").copy(isPinned = true))
+
+        val saved = stored.single()
+        assertEquals("content did not change", 1_000L, payloadOf(saved).contentChangedAt)
+        assertTrue("but the row must still be pushed", saved.updatedAt > 1_000L)
+    }
+
+    @Test
+    fun `editing the notes does count as changing the entry`() = runTest {
+        val original = entity("a", credential("a").copy(contentChangedAt = 1_000))
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("a").copy(notes = "edited"))
+
+        assertTrue(payloadOf(stored.single()).contentChangedAt > 1_000L)
+    }
+
+    @Test
+    fun `changing the autofill links counts as changing the entry`() = runTest {
+        val original = entity("a", credential("a").copy(contentChangedAt = 1_000))
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById("a") } returns original
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("a").copy(linkedDomains = listOf("example.com")))
+
+        assertTrue(payloadOf(stored.single()).contentChangedAt > 1_000L)
+    }
+
+    @Test
+    fun `a new credential stamps contentChangedAt`() = runTest {
+        val stored = mutableListOf<CredentialEntity>()
+        coEvery { dao.getById(any()) } returns null
+        coEvery { dao.upsert(any()) } answers { stored += firstArg<CredentialEntity>() }
+
+        repository.save(credential("new"))
+
+        assertTrue(payloadOf(stored.single()).contentChangedAt > 0)
+    }
+
+    @Test
+    fun `a payload written before the field existed falls back to the row clock`() = runTest {
+        // Everything already in the live vault is in this state, and it must not read as
+        // 1970 on the detail screen.
+        val legacy = """{"siteName":"Old","password":"pw"}"""
+        val decoded = CredentialPayloadCodec.decode(legacy, "a", 1_000, 7_000)
+
+        assertEquals(7_000L, decoded.contentChangedAt)
     }
 
     // -- Finding #29: password age vs row age ---------------------------------------------

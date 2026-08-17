@@ -34,6 +34,10 @@ object CredentialPayloadCodec {
             put("isPinned", credential.isPinned)
             put("linkedPackages", JSONArray(credential.linkedPackages))
             put("linkedDomains", JSONArray(credential.linkedDomains))
+            // In the payload rather than on the row, unlike the other timestamps: nothing
+            // sorts or filters by it, and a new column would need a migration where a new
+            // payload field does not (#58).
+            put("contentChangedAt", credential.contentChangedAt)
         }.toString()
 
     fun decode(
@@ -59,7 +63,10 @@ object CredentialPayloadCodec {
             linkedDomains = obj.optJSONArray("linkedDomains").toStringList(),
             createdAt = createdAt,
             updatedAt = updatedAt,
-            passwordChangedAt = passwordChangedAt
+            passwordChangedAt = passwordChangedAt,
+            // Entries written before this field existed fall back to the row clock, which
+            // is what they were already being displayed as.
+            contentChangedAt = obj.optLong("contentChangedAt", updatedAt)
         )
     }
 

@@ -189,6 +189,7 @@ object VaultBackupFormat {
                     put("isPinned", credential.isPinned)
                     put("linkedPackages", JSONArray(credential.linkedPackages))
                     put("linkedDomains", JSONArray(credential.linkedDomains))
+                    put("contentChangedAt", credential.contentChangedAt)
                 }
             )
         }
@@ -228,7 +229,10 @@ object VaultBackupFormat {
                     linkedDomains = obj.optJSONArray("linkedDomains").toStringList(),
                     createdAt = createdAt,
                     updatedAt = updatedAt,
-                    passwordChangedAt = obj.optLong("passwordChangedAt", updatedAt)
+                    passwordChangedAt = obj.optLong("passwordChangedAt", updatedAt),
+                    // Same convention: backups written before the field existed report the
+                    // row clock, which is what they were displaying anyway (#58).
+                    contentChangedAt = obj.optLong("contentChangedAt", updatedAt)
                 )
             )
         }

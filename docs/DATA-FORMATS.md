@@ -56,18 +56,26 @@ The plaintext that gets sealed into `encryptedPayload`. Read and written by
   "tags":           ["work", "2fa"],
   "isPinned":       false,
   "linkedPackages": ["com.github.android"],
-  "linkedDomains":  ["github.com"]
+  "linkedDomains":  ["github.com"],
+  "contentChangedAt": 1750000000000
 }
 ```
 
-Encoding is UTF-8. All reads use `optString` / `optBoolean` / `optJSONArray` with
-defaults, so **adding a field is backward-compatible** and older payloads decode fine.
+Encoding is UTF-8. All reads use `optString` / `optBoolean` / `optJSONArray` / `optLong`
+with defaults, so **adding a field is backward-compatible** and older payloads decode fine.
 Removing or renaming a field is not.
 
-Identity and timestamps live on the *row*, not in the payload — `id`, `createdAt`,
+Identity and most timestamps live on the *row*, not in the payload — `id`, `createdAt`,
 `updatedAt` and `passwordChangedAt` come from `CredentialEntity` when reconstructing a
 `Credential`. Nothing searchable lives outside the payload, so filtering happens on
 already-decrypted summaries in `VaultViewModel` rather than in a query.
+
+`contentChangedAt` is the exception, and is in the payload precisely because nothing sorts
+or filters by it: a new column would have needed a migration, a new payload field did not.
+It records when the credential's *content* last changed, which `updatedAt` cannot — that is
+the sync clock, and pinning an entry has to move it because the pin state travels in this
+payload. Payloads written before the field existed decode to `updatedAt`, which is what
+they were being displayed as anyway (finding #58).
 
 `VaultAutofillService` and `AutofillAuthActivity` parse this JSON independently and read
 only a subset of fields. Any payload change needs those two call sites checked too.
