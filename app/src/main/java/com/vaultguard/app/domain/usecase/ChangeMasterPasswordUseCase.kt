@@ -51,11 +51,11 @@ class ChangeMasterPasswordUseCase @Inject constructor(
 
         masterPasswordManager.rewrapForNewPassword(newPassword, vaultKey)
 
-        try {
-            val (ciphertext, iv) = masterPasswordManager.getVerificationData()
-            syncService.pushVaultConfig(masterPasswordManager.getSalt(), ciphertext, iv)
-        } catch (e: Exception) {
-            Timber.w(e, "Could not push new vault config; will retry on next full sync")
+        // The salt changed, so any other device needs the new config — but only if the
+        // owner turned sync on. Best effort; the next full sync republishes it.
+        if (syncService.isSyncEnabled) {
+            runCatching { syncService.pushVaultConfig() }
+                .onFailure { Timber.w(it, "Could not push new vault config; will retry on sync") }
         }
 
         return ChangeMasterPasswordResult(succeeded = true)

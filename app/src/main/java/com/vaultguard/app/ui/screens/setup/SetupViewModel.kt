@@ -68,11 +68,9 @@ class SetupViewModel @Inject constructor(
             _uiState.value = state.copy(isLoading = true)
             try {
                 masterPasswordManager.setup(state.password.toCharArray())
-                // Push vault config to Firestore for cross-device recovery (non-fatal)
-                try {
-                    val (ciphertext, iv) = masterPasswordManager.getVerificationData()
-                    syncService.pushVaultConfig(masterPasswordManager.getSalt(), ciphertext, iv)
-                } catch (_: Exception) { }
+                // Nothing is published here. Setup used to push the vault config to
+                // Firestore unconditionally, which quietly created a cloud vault for a
+                // user who had never asked for one (#15). Sync publishes it when enabled.
                 _uiState.value = _uiState.value.copy(isLoading = false, isComplete = true)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false, error = "Setup failed: ${e.message}")

@@ -346,14 +346,20 @@ class MasterPasswordManagerTest {
         remote.setup("remote-password".toCharArray())
         val (remoteCiphertext, remoteIv) = remote.getVerificationData()
 
-        manager.adoptRemoteSetup(remote.getSalt(), remoteCiphertext, remoteIv)
+        val remoteWrappedKey = remote.getWrappedVaultKey()!!
+
+        manager.adoptRemoteSetup(remote.getSalt(), remoteCiphertext, remoteIv, remoteWrappedKey)
         manager.lockVault()
 
+        // The wrapped vault key travels with the salt now, so adopting a remote config
+        // leaves a vault that can actually be opened — the gap behind #4.
         val remoteMasterKey = manager.deriveMasterKey("remote-password".toCharArray())!!
-        assertTrue("the remote password now verifies", manager.verifyMasterKey(remoteMasterKey))
-        assertNull(
-            "but it cannot unwrap this device's vault key",
-            manager.unwrapVaultKey(remoteMasterKey)
+        assertTrue("the remote password verifies", manager.verifyMasterKey(remoteMasterKey))
+        val adoptedVaultKey = manager.unwrapVaultKey(remoteMasterKey)
+        assertNotNull("and it unwraps the remote vault key", adoptedVaultKey)
+        assertEquals(
+            remote.getSessionKey().encoded.toList(),
+            adoptedVaultKey!!.encoded.toList()
         )
     }
 }

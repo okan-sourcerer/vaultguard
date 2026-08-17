@@ -92,11 +92,14 @@ class GoogleAuthManager @Inject constructor(
     }
 
     /**
-     * Signs out from Google and Firebase, then signs in anonymously.
+     * Signs out of Google and Firebase, and stays signed out.
+     *
+     * This used to sign back in anonymously straight away, so "signed out" left an account
+     * that the next sync happily uploaded the whole vault to (#16). There is no reason for
+     * this app to hold an anonymous identity: sync is opt-in and needs a real account.
      */
-    suspend fun signOutAndGoAnonymous() {
-        googleSignInClient.signOut().await()
+    suspend fun signOut() {
+        runCatching { googleSignInClient.signOut().await() }
         auth.signOut()
-        auth.signInAnonymously().await()
     }
 }

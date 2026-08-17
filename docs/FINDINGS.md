@@ -12,7 +12,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | 1 | DI deletes the entire vault on any DB-open failure | `di/DatabaseModule.kt:35-50` | **fixed** (chunk 2) |
 | 2 | `allowBackup=true` with template rules; restore triggers #1 | `AndroidManifest.xml:9-11`, `res/xml/*` | **fixed** (chunk 2) |
 | 3 | Import yields undecryptable entries (double-encrypted backup) | `usecase/ImportVaultUseCase.kt:48-74` | **fixed** (chunk 7) |
-| 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | open — sharpened by the vault-key change, see below |
+| 4 | Google sign-in adopts remote salt, uploads then orphans local vault | `settings/SettingsViewModel.kt:219-247` | **mostly fixed** (chunk 10) |
 | 5 | Master-password change is not transactional | `usecase/ChangeMasterPasswordUseCase.kt:27-42` | **fixed** (chunk 5) |
 | 6 | Password change leaves biometric wrapping the old key | `usecase/ChangeMasterPasswordUseCase.kt` | **fixed** (chunk 4) |
 | 7 | `unlockWithKey` never validates the key | `security/MasterPasswordManager.kt:96-98` | **fixed** (chunk 3) |
@@ -37,13 +37,16 @@ password, KDF parameters carried in the file, and an importer that re-encrypts u
 receiving vault's key. Existing v1 files became restorable in the same change — their outer
 envelope and inner payloads share one key, so the backup password opens both.
 
-**#4** — `fullSync()` runs *before* `lockVault()`, pushing rows encrypted under the old
-local key into the shared remote vault, and the adopted salt orphans every local row.
+**#4** — `fullSync()` ran *before* `lockVault()`, pushing rows encrypted under the old
+local key into the shared remote vault, and the adopted salt orphaned every local row.
 
-Since the vault-key indirection this is sharper, not milder: `adoptRemoteSetup` replaces
-the salt and verification blob but **not** the wrapped vault key, so after adopting, the
-remote master password verifies while unwrapping the local vault key fails. A test pins
-that behaviour so chunk 10 has something concrete to change.
+The data-loss halves are fixed. The vault config now carries the wrapped vault key, so
+adopting one leaves a vault that can actually be opened; and a salt mismatch during sync
+turns sync off and reports it rather than uploading rows the destination could never read.
+
+What remains is onboarding, not correctness: joining an account that already holds a
+different vault is refused, with instructions, instead of offering to merge or replace.
+That is a flow to design, and it needs a second device to exercise.
 
 **#5** — salt and verification are switched before the re-encryption loop, which has no
 transaction. A failure mid-sweep splits the vault across two keys.
@@ -66,8 +69,8 @@ reports true.
 | 12 | Brute-force backoff caps at 32 s and resets on restart | `unlock/UnlockViewModel.kt:82-98` | **fixed** (chunk 9) |
 | 13 | `FLAG_SECURE` missing on both autofill activities | `MainActivity.kt:35` only | **fixed** (chunk 8) |
 | 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | open |
-| 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | open |
-| 16 | Sign-out claims sync disabled, re-enables it anonymously | `security/GoogleAuthManager.kt:97-101` | open |
+| 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | **fixed** (chunk 10) |
+| 16 | Sign-out claims sync disabled, re-enables it anonymously | `security/GoogleAuthManager.kt:97-101` | **fixed** (chunk 10) |
 | 17 | Argon2 runs on the main thread | `SetupViewModel.kt:70`, `UnlockViewModel.kt:55`, `AutofillAuthActivity.kt:128` | **fixed** (chunk 5) |
 | 18 | `onSaveRequest` does `runBlocking` on the main thread | `autofill/VaultAutofillService.kt:151` | **fixed** (chunk 5) |
 
@@ -138,12 +141,12 @@ browsed thereafter. #34 added expiry to this without addressing the key.
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
-| 19 | Changes made during a sync are lost permanently | `data/remote/FirebaseSyncService.kt:139-144` | open |
-| 20 | Clock skew silently drops remote changes | `data/remote/FirebaseSyncService.kt:105-110` | open |
-| 21 | Unbounded Firestore batch (500-op cap) | `data/remote/FirebaseSyncService.kt:92-97, 197-203` | open |
-| 22 | Anon→Google config migration skipped when no credentials exist | `data/remote/FirebaseSyncService.kt:195` | open |
-| 23 | Last-write-wins with arbitrary tiebreak; conflicts silently discarded | `data/remote/FirebaseSyncService.kt:117-119` | open |
-| 24 | Tombstones never purged, locally or remotely | schema-wide | open |
+| 19 | Changes made during a sync are lost permanently | `data/remote/FirebaseSyncService.kt:139-144` | **fixed** (chunk 10) |
+| 20 | Clock skew silently drops remote changes | `data/remote/FirebaseSyncService.kt:105-110` | **fixed** (chunk 10) |
+| 21 | Unbounded Firestore batch (500-op cap) | `data/remote/FirebaseSyncService.kt:92-97, 197-203` | **fixed** (chunk 10) |
+| 22 | Anon→Google config migration skipped when no credentials exist | `data/remote/FirebaseSyncService.kt:195` | **obsolete** (chunk 10) |
+| 23 | Last-write-wins with arbitrary tiebreak; conflicts silently discarded | `data/remote/FirebaseSyncService.kt:117-119` | **fixed** (chunk 10) |
+| 24 | Tombstones never purged, locally or remotely | schema-wide | **fixed** (chunk 10) |
 
 Full analysis in [SYNC.md](SYNC.md).
 

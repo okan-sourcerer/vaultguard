@@ -101,6 +101,18 @@ class ChangeMasterPasswordUseCaseTest {
     // -- The payoff -------------------------------------------------------------------------
 
     @Test
+    fun `the vault config is not published when sync is off`() = runTest {
+        // Publishing used to happen unconditionally, creating a cloud vault for someone who
+        // had never enabled sync (#15).
+        givenCredentials(1)
+        io.mockk.every { syncService.isSyncEnabled } returns false
+
+        assertTrue(useCase("old-password".toCharArray(), "new-password".toCharArray()).succeeded)
+
+        coVerify(exactly = 0) { syncService.pushVaultConfig() }
+    }
+
+    @Test
     fun `no credential row is touched`() = runTest {
         givenCredentials(5)
         val before = stored.map { it.id to it.encryptedPayload.toList() }
@@ -206,7 +218,8 @@ class ChangeMasterPasswordUseCaseTest {
     @Test
     fun `a failure pushing the new config does not fail the change`() = runTest {
         givenCredentials(1)
-        coEvery { syncService.pushVaultConfig(any(), any(), any()) } throws IllegalStateException("offline")
+        io.mockk.every { syncService.isSyncEnabled } returns true
+        coEvery { syncService.pushVaultConfig() } throws IllegalStateException("offline")
 
         val result = useCase("old-password".toCharArray(), "new-password".toCharArray())
 

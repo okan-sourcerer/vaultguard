@@ -1,240 +1,350 @@
 package com.vaultguard.app.data.remote
 
-import android.content.Context
 import android.util.Base64
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.vaultguard.app.data.local.db.dao.CredentialDao
 import com.vaultguard.app.data.local.db.entity.CredentialEntity
 import com.vaultguard.app.security.MasterPasswordManager
 import kotlinx.coroutines.tasks.await
+import timber.log.Timber
+import java.util.UUID
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+class SyncNotEnabledException : Exception("Cloud sync is not enabled.")
+class SyncNotAuthenticatedException : Exception("Sign in to sync.")
+
+data class SyncResult(
+    val pushed: Int = 0,
+    val pulled: Int = 0,
+    val conflicts: Int = 0,
+    val purged: Int = 0
+)
+
+/**
+ * Replicates encrypted credential blobs to Firestore.
+ *
+ * ## Consent
+ *
+ * Every entry point requires sync to have been switched on and a user to be signed in.
+ * Nothing signs in implicitly. The previous version called `signInAnonymously()` from
+ * whatever needed a user, so pulling to refresh the vault list uploaded the whole vault to
+ * an anonymous account the owner never asked for (#15).
+ *
+ * ## Ordering
+ *
+ * Push is driven by a per-row dirty flag, pull by a Firestore **server** timestamp. Neither
+ * compares one device's clock against another's — see [SyncMerge].
+ */
 @Singleton
 class FirebaseSyncService @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
     private val credentialDao: CredentialDao,
-    private val masterPasswordManager: MasterPasswordManager
+    private val masterPasswordManager: MasterPasswordManager,
+    private val syncPreferences: SyncPreferences
 ) {
 
     companion object {
         private const val COLLECTION_VAULTS = "vaults"
         private const val COLLECTION_CREDENTIALS = "credentials"
-        private const val DOC_CONFIG = "config"
+
         private const val FIELD_SALT = "salt"
         private const val FIELD_VERIFICATION_CIPHERTEXT = "verificationCiphertext"
         private const val FIELD_VERIFICATION_IV = "verificationIv"
+        private const val FIELD_VAULT_KEY_CIPHERTEXT = "vaultKeyCiphertext"
+        private const val FIELD_VAULT_KEY_IV = "vaultKeyIv"
+
         private const val FIELD_ENCRYPTED_PAYLOAD = "encryptedPayload"
         private const val FIELD_IV = "iv"
         private const val FIELD_CREATED_AT = "createdAt"
         private const val FIELD_UPDATED_AT = "updatedAt"
+        private const val FIELD_PASSWORD_CHANGED_AT = "passwordChangedAt"
         private const val FIELD_IS_DELETED = "isDeleted"
+
+        /** Server-assigned, so every device agrees on the ordering regardless of its clock. */
+        private const val FIELD_SERVER_UPDATED_AT = "serverUpdatedAt"
+
+        private val TOMBSTONE_RETENTION_MILLIS = TimeUnit.DAYS.toMillis(30)
     }
 
     data class RemoteVaultConfig(
         val salt: ByteArray,
         val verificationCiphertext: ByteArray,
-        val verificationIv: ByteArray
-    )
-
-    private fun getUserId(): String {
-        return auth.currentUser?.uid ?: throw IllegalStateException("User not authenticated")
+        val verificationIv: ByteArray,
+        val vaultKeyCiphertext: ByteArray?,
+        val vaultKeyIv: ByteArray?
+    ) {
+        override fun equals(other: Any?) = this === other ||
+            (other is RemoteVaultConfig && salt.contentEquals(other.salt))
+        override fun hashCode() = salt.contentHashCode()
     }
 
-    private fun vaultDocument() =
-        firestore.collection(COLLECTION_VAULTS).document(getUserId())
+    val isSignedIn: Boolean get() = auth.currentUser != null
 
-    private fun credentialsCollection() =
-        vaultDocument().collection(COLLECTION_CREDENTIALS)
+    val isSyncEnabled: Boolean get() = syncPreferences.isEnabled && isSignedIn
 
-    /**
-     * Uploads the vault config (salt + verification data) to Firestore.
-     * The salt alone is useless without the master password — safe to store remotely.
-     */
-    /**
-     * Writes vault config (salt + verification data) directly onto the vault document.
-     * Path: vaults/{uid}  — same document the security rules already protect.
-     */
-    suspend fun pushVaultConfig(salt: ByteArray, verificationCiphertext: ByteArray, verificationIv: ByteArray) {
-        ensureAuthenticated()
-        val data = mapOf(
-            FIELD_SALT to Base64.encodeToString(salt, Base64.NO_WRAP),
-            FIELD_VERIFICATION_CIPHERTEXT to Base64.encodeToString(verificationCiphertext, Base64.NO_WRAP),
-            FIELD_VERIFICATION_IV to Base64.encodeToString(verificationIv, Base64.NO_WRAP)
-        )
-        vaultDocument().set(data, com.google.firebase.firestore.SetOptions.merge()).await()
+    private fun requireUserId(): String =
+        auth.currentUser?.uid ?: throw SyncNotAuthenticatedException()
+
+    private fun requireEnabled() {
+        if (!syncPreferences.isEnabled) throw SyncNotEnabledException()
+        requireUserId()
+    }
+
+    private fun vaultDocument(uid: String = requireUserId()) =
+        firestore.collection(COLLECTION_VAULTS).document(uid)
+
+    private fun credentialsCollection(uid: String = requireUserId()) =
+        vaultDocument(uid).collection(COLLECTION_CREDENTIALS)
+
+    /** Turns sync on and performs the first exchange. */
+    suspend fun enable(): SyncResult {
+        requireUserId()
+        syncPreferences.isEnabled = true
+        return fullSync()
     }
 
     /**
-     * Reads vault config from the vault document.
-     * Returns null if no config has been pushed yet (first device).
+     * Turns sync off. With [deleteRemote], the account's vault is removed from Firestore
+     * as well.
+     *
+     * Sign-out used to say "Cloud sync disabled" and then immediately sign in anonymously,
+     * so the next sync re-uploaded everything to a fresh cloud vault (#16). There was also
+     * no way to remove what had already been uploaded.
      */
+    suspend fun disable(deleteRemote: Boolean): Int {
+        var deleted = 0
+        if (deleteRemote && isSignedIn) {
+            deleted = deleteRemoteVault()
+        }
+        syncPreferences.isEnabled = false
+        syncPreferences.clearCursors()
+        return deleted
+    }
+
+    suspend fun deleteRemoteVault(): Int {
+        val uid = requireUserId()
+        val documents = credentialsCollection(uid).get().await().documents
+        var deleted = 0
+        for (chunk in SyncMerge.batched(documents)) {
+            val batch = firestore.batch()
+            chunk.forEach { batch.delete(it.reference) }
+            batch.commit().await()
+            deleted += chunk.size
+        }
+        vaultDocument(uid).delete().await()
+        Timber.i("Deleted %d remote credentials and the vault config", deleted)
+        return deleted
+    }
+
+    // -- Vault config ---------------------------------------------------------------------
+
+    /**
+     * Publishes the material another device needs to open this vault.
+     *
+     * Includes the wrapped vault key. Without it a second device can verify the master
+     * password and still not reach the key the rows are encrypted under — the gap that made
+     * adopting a remote config orphan the vault (#4).
+     */
+    suspend fun pushVaultConfig() {
+        requireEnabled()
+        val (verificationCiphertext, verificationIv) = masterPasswordManager.getVerificationData()
+        val wrapped = masterPasswordManager.getWrappedVaultKey()
+
+        val data = buildMap<String, Any> {
+            put(FIELD_SALT, masterPasswordManager.getSalt().toBase64())
+            put(FIELD_VERIFICATION_CIPHERTEXT, verificationCiphertext.toBase64())
+            put(FIELD_VERIFICATION_IV, verificationIv.toBase64())
+            if (wrapped != null) {
+                put(FIELD_VAULT_KEY_CIPHERTEXT, wrapped.ciphertext.toBase64())
+                put(FIELD_VAULT_KEY_IV, wrapped.iv.toBase64())
+            }
+        }
+        vaultDocument().set(data, SetOptions.merge()).await()
+    }
+
     suspend fun pullVaultConfig(): RemoteVaultConfig? {
-        ensureAuthenticated()
+        requireUserId()
         val doc = vaultDocument().get().await()
-        val saltStr = doc.getString(FIELD_SALT) ?: return null
-        val ciphertextStr = doc.getString(FIELD_VERIFICATION_CIPHERTEXT) ?: return null
-        val ivStr = doc.getString(FIELD_VERIFICATION_IV) ?: return null
+        val salt = doc.getString(FIELD_SALT)?.fromBase64() ?: return null
+        val ciphertext = doc.getString(FIELD_VERIFICATION_CIPHERTEXT)?.fromBase64() ?: return null
+        val iv = doc.getString(FIELD_VERIFICATION_IV)?.fromBase64() ?: return null
         return RemoteVaultConfig(
-            salt = Base64.decode(saltStr, Base64.NO_WRAP),
-            verificationCiphertext = Base64.decode(ciphertextStr, Base64.NO_WRAP),
-            verificationIv = Base64.decode(ivStr, Base64.NO_WRAP)
+            salt = salt,
+            verificationCiphertext = ciphertext,
+            verificationIv = iv,
+            vaultKeyCiphertext = doc.getString(FIELD_VAULT_KEY_CIPHERTEXT)?.fromBase64(),
+            vaultKeyIv = doc.getString(FIELD_VAULT_KEY_IV)?.fromBase64()
         )
     }
 
-    suspend fun pushChanges(since: Long) {
-        val modified = credentialDao.getModifiedSince(since)
-        if (modified.isEmpty()) return
+    // -- Sync ------------------------------------------------------------------------------
 
-        val batch = firestore.batch()
-        for (entity in modified) {
-            val docRef = credentialsCollection().document(entity.id)
-            batch.set(docRef, entityToMap(entity))
-        }
-        batch.commit().await()
+    suspend fun fullSync(): SyncResult {
+        requireEnabled()
 
-        val now = System.currentTimeMillis()
-        for (entity in modified) {
-            credentialDao.upsert(entity.copy(syncedAt = now))
-        }
-    }
-
-    suspend fun pullChanges(since: Long): List<CredentialEntity> {
-        val snapshot = credentialsCollection()
-            .whereGreaterThan(FIELD_UPDATED_AT, since)
-            .get()
-            .await()
-
-        val remoteEntities = snapshot.documents.mapNotNull { doc ->
-            mapToEntity(doc.id, doc.data ?: return@mapNotNull null)
-        }
-
-        for (remote in remoteEntities) {
-            val local = credentialDao.getById(remote.id)
-            if (local == null || remote.updatedAt > local.updatedAt ||
-                (remote.updatedAt == local.updatedAt && local.syncedAt != null)
-            ) {
-                credentialDao.upsert(remote.copy(syncedAt = System.currentTimeMillis()))
-            }
-        }
-
-        return remoteEntities
-    }
-
-    suspend fun fullSync() {
-        ensureAuthenticated()
-
-        // Ensure vault config is on Firestore (idempotent — only writes if missing)
-        try {
-            val remoteConfig = pullVaultConfig()
-            if (remoteConfig == null && masterPasswordManager.isSetupComplete) {
-                val (ciphertext, iv) = masterPasswordManager.getVerificationData()
-                pushVaultConfig(masterPasswordManager.getSalt(), ciphertext, iv)
-            }
-        } catch (_: Exception) { }
-
-        val lastSync = getLastSyncTime()
-
-        pushChanges(lastSync)
-        pullChanges(lastSync)
-
-        saveLastSyncTime(System.currentTimeMillis())
-    }
-
-    fun isAuthenticated(): Boolean = auth.currentUser != null
-
-    suspend fun ensureAuthenticated() {
-        if (auth.currentUser == null) {
-            auth.signInAnonymously().await()
-        }
-    }
-
-    private fun entityToMap(entity: CredentialEntity): Map<String, Any?> {
-        return mapOf(
-            FIELD_ENCRYPTED_PAYLOAD to Base64.encodeToString(entity.encryptedPayload, Base64.NO_WRAP),
-            FIELD_IV to Base64.encodeToString(entity.iv, Base64.NO_WRAP),
-            FIELD_CREATED_AT to entity.createdAt,
-            FIELD_UPDATED_AT to entity.updatedAt,
-            FIELD_IS_DELETED to entity.isDeleted
-        )
-    }
-
-    private fun mapToEntity(id: String, data: Map<String, Any>): CredentialEntity? {
-        return try {
-            CredentialEntity(
-                id = id,
-                encryptedPayload = Base64.decode(data[FIELD_ENCRYPTED_PAYLOAD] as String, Base64.NO_WRAP),
-                iv = Base64.decode(data[FIELD_IV] as String, Base64.NO_WRAP),
-                createdAt = (data[FIELD_CREATED_AT] as Number).toLong(),
-                updatedAt = (data[FIELD_UPDATED_AT] as Number).toLong(),
-                isDeleted = data[FIELD_IS_DELETED] as? Boolean ?: false
+        val remoteConfig = runCatching { pullVaultConfig() }.getOrNull()
+        if (remoteConfig == null) {
+            // First device on this account.
+            runCatching { pushVaultConfig() }
+                .onFailure { Timber.w(it, "Could not publish vault config") }
+        } else if (!remoteConfig.salt.contentEquals(masterPasswordManager.getSalt())) {
+            // A vault from elsewhere. Uploading local rows now would put blobs encrypted
+            // under this device's key into a vault keyed differently, which nothing could
+            // ever read — the poisoning half of #4. Refuse rather than guess.
+            syncPreferences.isEnabled = false
+            throw IllegalStateException(
+                "This account already holds a different vault. Sync has been turned off to " +
+                    "avoid mixing the two. Export a backup, then either delete the cloud " +
+                    "vault from Settings or import into a fresh install."
             )
-        } catch (e: Exception) {
-            null
         }
+
+        val pushed = pushPending()
+        val pull = pullChanges()
+        val purged = purgeTombstones()
+
+        return SyncResult(pushed, pull.pulled, pull.conflicts, purged)
     }
 
-    /**
-     * Migrates all credentials and config from an old anonymous UID to the current user's vault.
-     * Called when anonymous account linking fails and we sign in with a separate Google account.
-     */
-    suspend fun migrateFromAnonymousUser(oldAnonymousUid: String) {
-        ensureAuthenticated()
-        val newUid = getUserId()
-        if (oldAnonymousUid == newUid) return // same user, nothing to migrate
+    /** Uploads every row whose local edit has not reached the server. */
+    private suspend fun pushPending(): Int {
+        val uid = requireUserId()
+        val pending = credentialDao.getPendingPush()
+        if (pending.isEmpty()) return 0
 
-        val oldCredentials = firestore.collection(COLLECTION_VAULTS)
-            .document(oldAnonymousUid)
-            .collection(COLLECTION_CREDENTIALS)
+        var pushed = 0
+        for (chunk in SyncMerge.batched(pending)) {
+            val batch = firestore.batch()
+            chunk.forEach { entity ->
+                batch.set(credentialsCollection(uid).document(entity.id), entity.toRemoteMap())
+            }
+            batch.commit().await()
+
+            // syncedAt records the value that was actually uploaded, not "now". A row
+            // edited while the batch was in flight has a higher updatedAt and stays dirty.
+            credentialDao.upsertAll(chunk.map { it.copy(syncedAt = it.updatedAt) })
+            pushed += chunk.size
+        }
+        Timber.i("Pushed %d credentials", pushed)
+        return pushed
+    }
+
+    private data class PullOutcome(val pulled: Int, val conflicts: Int)
+
+    private suspend fun pullChanges(): PullOutcome {
+        val uid = requireUserId()
+        val cursor = syncPreferences.pullCursor(uid)
+
+        val snapshot = credentialsCollection(uid)
+            .whereGreaterThan(FIELD_SERVER_UPDATED_AT, Timestamp(cursor / 1000, 0))
+            .orderBy(FIELD_SERVER_UPDATED_AT, Query.Direction.ASCENDING)
             .get()
             .await()
 
-        if (oldCredentials.isEmpty) return
+        val toWrite = mutableListOf<CredentialEntity>()
+        var conflicts = 0
+        var highest = cursor
 
-        val batch = firestore.batch()
-        for (doc in oldCredentials.documents) {
-            val data = doc.data ?: continue
-            val newDocRef = credentialsCollection().document(doc.id)
-            batch.set(newDocRef, data)
-        }
-        batch.commit().await()
+        for (doc in snapshot.documents) {
+            val serverTime = doc.getTimestamp(FIELD_SERVER_UPDATED_AT)
+                ?: continue // still pending on the server; it will arrive next time
+            val remote = doc.toEntity() ?: continue
 
-        // Only migrate config if the destination vault has none yet.
-        // If a config already exists (another device's vault), preserve it — it is canonical.
-        try {
-            val destDoc = vaultDocument().get().await()
-            if (destDoc.getString(FIELD_SALT) == null) {
-                val oldDoc = firestore.collection(COLLECTION_VAULTS)
-                    .document(oldAnonymousUid).get().await()
-                val salt = oldDoc.getString(FIELD_SALT)
-                val ciphertext = oldDoc.getString(FIELD_VERIFICATION_CIPHERTEXT)
-                val iv = oldDoc.getString(FIELD_VERIFICATION_IV)
-                if (salt != null && ciphertext != null && iv != null) {
-                    vaultDocument().set(
-                        mapOf(
-                            FIELD_SALT to salt,
-                            FIELD_VERIFICATION_CIPHERTEXT to ciphertext,
-                            FIELD_VERIFICATION_IV to iv
-                        ),
-                        com.google.firebase.firestore.SetOptions.merge()
-                    ).await()
+            val local = credentialDao.getById(remote.id)
+            val decision = SyncMerge.decide(
+                local = local?.let {
+                    SyncMerge.LocalState(it.updatedAt, it.syncedAt, it.isDeleted)
+                },
+                remoteIsDeleted = remote.isDeleted
+            )
+
+            when (decision) {
+                SyncMerge.Decision.TakeRemote ->
+                    toWrite += remote.copy(syncedAt = remote.updatedAt)
+
+                SyncMerge.Decision.KeepLocal -> Unit
+
+                SyncMerge.Decision.Conflict -> {
+                    // Keep both. The remote copy lands under a fresh id and will be pushed
+                    // back on the next round, so neither edit is lost.
+                    conflicts++
+                    toWrite += remote.copy(id = UUID.randomUUID().toString(), syncedAt = null)
+                    Timber.w("Sync conflict on %s; kept both copies", remote.id)
                 }
             }
-        } catch (_: Exception) { }
+
+            highest = maxOf(highest, serverTime.toDate().time)
+        }
+
+        if (toWrite.isNotEmpty()) credentialDao.upsertAll(toWrite)
+        // Advanced only after the rows are committed, so a crash re-pulls rather than skips.
+        if (highest > cursor) syncPreferences.setPullCursor(uid, highest)
+
+        if (toWrite.isNotEmpty()) Timber.i("Pulled %d credentials", toWrite.size)
+        return PullOutcome(toWrite.size, conflicts)
     }
 
-    private val prefs by lazy {
-        context.getSharedPreferences("sync_prefs", android.content.Context.MODE_PRIVATE)
+    /** Drops tombstones both sides have seen and that are older than the retention window. */
+    private suspend fun purgeTombstones(): Int {
+        val uid = requireUserId()
+        val cutoff = System.currentTimeMillis() - TOMBSTONE_RETENTION_MILLIS
+        val stale = credentialDao.getPurgeableTombstones(cutoff)
+        if (stale.isEmpty()) return 0
+
+        for (chunk in SyncMerge.batched(stale)) {
+            val batch = firestore.batch()
+            chunk.forEach { batch.delete(credentialsCollection(uid).document(it.id)) }
+            batch.commit().await()
+            credentialDao.deleteByIds(chunk.map { it.id })
+        }
+        Timber.i("Purged %d tombstones", stale.size)
+        return stale.size
     }
 
-    private fun getLastSyncTime(): Long = prefs.getLong("last_sync_time_${getUserIdOrNull()}", 0L)
+    // -- Mapping ------------------------------------------------------------------------------
 
-    private fun saveLastSyncTime(time: Long) {
-        prefs.edit().putLong("last_sync_time_${getUserIdOrNull()}", time).apply()
-    }
+    private fun CredentialEntity.toRemoteMap(): Map<String, Any?> = mapOf(
+        FIELD_ENCRYPTED_PAYLOAD to encryptedPayload.toBase64(),
+        FIELD_IV to iv.toBase64(),
+        FIELD_CREATED_AT to createdAt,
+        FIELD_UPDATED_AT to updatedAt,
+        FIELD_PASSWORD_CHANGED_AT to passwordChangedAt,
+        FIELD_IS_DELETED to isDeleted,
+        FIELD_SERVER_UPDATED_AT to FieldValue.serverTimestamp()
+    )
 
-    private fun getUserIdOrNull(): String? = auth.currentUser?.uid
+    private fun com.google.firebase.firestore.DocumentSnapshot.toEntity(): CredentialEntity? =
+        try {
+            val payload = getString(FIELD_ENCRYPTED_PAYLOAD)?.fromBase64()
+            val iv = getString(FIELD_IV)?.fromBase64()
+            if (payload == null || iv == null) {
+                null
+            } else {
+                val updatedAt = getLong(FIELD_UPDATED_AT) ?: 0L
+                CredentialEntity(
+                    id = id,
+                    encryptedPayload = payload,
+                    iv = iv,
+                    createdAt = getLong(FIELD_CREATED_AT) ?: updatedAt,
+                    updatedAt = updatedAt,
+                    passwordChangedAt = getLong(FIELD_PASSWORD_CHANGED_AT) ?: updatedAt,
+                    isDeleted = getBoolean(FIELD_IS_DELETED) ?: false
+                )
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Skipping malformed remote credential %s", id)
+            null
+        }
+
+    private fun ByteArray.toBase64(): String = Base64.encodeToString(this, Base64.NO_WRAP)
+
+    private fun String.fromBase64(): ByteArray = Base64.decode(this, Base64.NO_WRAP)
 }

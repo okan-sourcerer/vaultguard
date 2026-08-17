@@ -32,8 +32,29 @@ interface CredentialDao {
     @Query("UPDATE credentials SET isDeleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: String, now: Long = System.currentTimeMillis())
 
-    @Query("SELECT * FROM credentials WHERE updatedAt > :since")
-    suspend fun getModifiedSince(since: Long): List<CredentialEntity>
+    /**
+     * Rows changed since they were last pushed.
+     *
+     * A per-row dirty flag rather than a global "modified since" cursor. The cursor version
+     * was stamped after the network round-trip, so anything saved while a sync was in
+     * flight fell between the query and the new cursor and was never pushed (#19). A row
+     * edited mid-sync is simply still dirty here.
+     */
+    @Query("SELECT * FROM credentials WHERE syncedAt IS NULL OR updatedAt > syncedAt")
+    suspend fun getPendingPush(): List<CredentialEntity>
+
+    /**
+     * Tombstones old enough to drop, and already confirmed pushed.
+     *
+     * Soft-deleted rows were never purged, so the vault and its Firestore mirror grew
+     * without bound (#24). The syncedAt condition means a tombstone is only forgotten once
+     * the other side has definitely seen it.
+     */
+    @Query("SELECT * FROM credentials WHERE isDeleted = 1 AND syncedAt IS NOT NULL AND updatedAt < :before")
+    suspend fun getPurgeableTombstones(before: Long): List<CredentialEntity>
+
+    @Query("DELETE FROM credentials WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
 
     @Query("SELECT * FROM credentials")
     suspend fun getAll(): List<CredentialEntity>

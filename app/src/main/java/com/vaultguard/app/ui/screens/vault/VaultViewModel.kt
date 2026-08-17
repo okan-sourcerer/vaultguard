@@ -160,10 +160,22 @@ class VaultViewModel @Inject constructor(
     }
 
     fun onSync() {
+        // Pulling to refresh used to sign in anonymously and upload the entire vault to an
+        // account the owner never created (#15). It now does nothing unless sync has been
+        // switched on deliberately.
+        if (!syncService.isSyncEnabled) {
+            error.value = "Cloud sync is off. Turn it on in Settings to sync."
+            return
+        }
+
         viewModelScope.launch {
             isSyncing.value = true
             try {
-                syncService.fullSync()
+                val result = syncService.fullSync()
+                if (result.conflicts > 0) {
+                    error.value = "${result.conflicts} entry(s) were edited in two places — " +
+                        "both copies were kept, review them in the list."
+                }
             } catch (e: Exception) {
                 error.value = "Sync failed: ${e.message}"
             } finally {

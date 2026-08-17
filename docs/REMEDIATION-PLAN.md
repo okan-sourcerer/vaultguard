@@ -403,7 +403,7 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 8 — Autofill security | #9, #10, #11, #13, #34, #35 | **done** — 36 tests |
 | 8a — Autofill usability | #47, #48, #49, #52 | **done** — 12 tests |
 | 9 — Auth hardening | #12 | **done** — 18 tests |
-| 10 — Sync rework | #19–#24, #4, #15, #16 | not started |
+| 10 — Sync rework | #19–#24, #4, #15, #16 | **done** — 17 tests |
 | 11 — Business logic + UX | #25–#28, #30, #33, #36, #37, #39 | not started |
 | 12 — Build + hygiene | #41–#46 | not started |
 | 13 — Usability pass | #50, #51, #53 and whatever it turns up | not started |

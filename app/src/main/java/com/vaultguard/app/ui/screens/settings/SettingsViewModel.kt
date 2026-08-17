@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.autofill.AutofillDismissedPrefs
 import com.vaultguard.app.data.remote.FirebaseSyncService
+import com.vaultguard.app.data.remote.SyncResult
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.domain.usecase.ChangeMasterPasswordUseCase
 import com.vaultguard.app.domain.usecase.backup.ExportVaultUseCase
@@ -47,6 +48,7 @@ data class SettingsUiState(
     val dismissedSavePrompts: Int = 0,
     val autofillSupported: Boolean = false,
     val isSignedInWithGoogle: Boolean = false,
+    val syncEnabled: Boolean = false,
     val googleEmail: String? = null,
     val googleDisplayName: String? = null,
     val vaultStats: VaultStats = VaultStats(),
@@ -133,6 +135,7 @@ class SettingsViewModel @Inject constructor(
             autofillEnabled = autofillManager?.hasEnabledAutofillServices() == true,
             dismissedSavePrompts = dismissedPrefs.dismissedCount,
             isSignedInWithGoogle = googleAuthManager.isSignedInWithGoogle,
+            syncEnabled = syncService.isSyncEnabled,
             googleEmail = googleAuthManager.currentUserEmail,
             googleDisplayName = googleAuthManager.currentUserDisplayName
         )
@@ -272,67 +275,82 @@ class SettingsViewModel @Inject constructor(
     fun handleGoogleSignInResult(data: Intent?) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val (result, oldAnonymousUid) = googleAuthManager.handleSignInResult(data)
+            val (result, _) = googleAuthManager.handleSignInResult(data)
             when (result) {
                 is GoogleSignInResult.Success -> {
-                    // If we had to sign in separately (link failed), migrate any anonymous data
-                    if (oldAnonymousUid != null) {
-                        try {
-                            syncService.migrateFromAnonymousUser(oldAnonymousUid)
-                        } catch (e: Exception) {
-                            Log.e("SettingsVM", "Migration failed", e)
-                        }
-                    }
-
-                    var adoptedRemoteVault = false
-                    try {
-                        val remoteConfig = syncService.pullVaultConfig()
-                        if (remoteConfig != null &&
-                            !remoteConfig.salt.contentEquals(masterPasswordManager.getSalt())
-                        ) {
-                            // A vault from another device exists — adopt its salt and
-                            // verification data so we derive the same key on unlock.
-                            masterPasswordManager.adoptRemoteSetup(
-                                remoteConfig.salt,
-                                remoteConfig.verificationCiphertext,
-                                remoteConfig.verificationIv
-                            )
-                            adoptedRemoteVault = true
-                        } else if (remoteConfig == null) {
-                            // First device — publish our vault config
-                            val (ciphertext, iv) = masterPasswordManager.getVerificationData()
-                            syncService.pushVaultConfig(masterPasswordManager.getSalt(), ciphertext, iv)
-                        }
-                        syncService.fullSync()
-                    } catch (_: Exception) { }
-
-                    if (adoptedRemoteVault) {
-                        // Adopting a different salt makes the biometric wrapper stale for
-                        // the same reason a password change does (finding #6) — it holds a
-                        // key derived from the old salt, which no longer opens this vault.
-                        biometricAuthManager.disableBiometric()
-                    }
-
+                    // Signing in no longer switches sync on by itself. Enabling it is a
+                    // separate, explicit choice — uploading a vault is not something to
+                    // infer from a sign-in (#15).
                     refreshState()
-                    if (adoptedRemoteVault) {
-                        // Lock so the user re-unlocks with the correct key (Device 1's salt)
-                        masterPasswordManager.lockVault(
-                            "Existing vault found — please re-unlock to sync your passwords."
-                        )
-                        _uiState.value = _uiState.value.copy(isLoading = false)
-                    } else {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            message = "Signed in as ${result.user.email}. Cloud sync enabled!"
-                        )
-                    }
-                }
-                is GoogleSignInResult.Error -> {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = "Sign-in failed: ${result.message}"
+                        message = "Signed in as ${result.user.email}. " +
+                            "Turn on cloud sync below when you want to upload."
                     )
                 }
+                is GoogleSignInResult.Error -> _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Sign-in failed: ${result.message}"
+                )
+            }
+        }
+    }
+
+    fun onEnableSync() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                val summary = syncService.enable()
+                refreshState()
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    message = "Cloud sync on. ${summary.describe()}"
+                )
+            } catch (e: Exception) {
+                refreshState()
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = e.message ?: "Could not enable cloud sync"
+                )
+            }
+        }
+    }
+
+    /**
+     * @param deleteRemote also removes the account's vault from Firestore. There was no way
+     *   to do that at all before (#16) — sign-out claimed sync was disabled and then went
+     *   on syncing anonymously.
+     */
+    fun onDisableSync(deleteRemote: Boolean) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                val deleted = syncService.disable(deleteRemote)
+                refreshState()
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    message = if (deleteRemote) "Cloud sync off. Deleted $deleted entries from the cloud."
+                    else "Cloud sync off. Your cloud copy was left in place."
+                )
+            } catch (e: Exception) {
+                refreshState()
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Could not turn off cloud sync: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun onSyncNow() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                val summary = syncService.fullSync()
+                _uiState.value = _uiState.value.copy(isLoading = false, message = summary.describe())
+            } catch (e: Exception) {
+                refreshState()
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message ?: "Sync failed")
             }
         }
     }
@@ -341,13 +359,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
             try {
-                googleAuthManager.signOutAndGoAnonymous()
+                // Turn sync off first, while the account is still available to talk to.
+                syncService.disable(deleteRemote = false)
+                googleAuthManager.signOut()
                 refreshState()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    message = "Signed out. Cloud sync disabled."
+                    message = "Signed out. Cloud sync is off and this device is local only."
                 )
             } catch (e: Exception) {
+                refreshState()
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Sign-out failed: ${e.message}"
@@ -373,4 +394,13 @@ class SettingsViewModel @Inject constructor(
     fun onLockVault() {
         masterPasswordManager.lockVault()
     }
+
+}
+
+private fun SyncResult.describe(): String = buildString {
+    append("Pushed $pushed, pulled $pulled.")
+    if (conflicts > 0) {
+        append(" $conflicts entry(s) were edited in two places — both copies were kept.")
+    }
+    if (purged > 0) append(" Cleaned up $purged deleted entries.")
 }

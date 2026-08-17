@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -102,6 +103,7 @@ fun SettingsScreen(
     // TEMPORARY — cleartext migration aid, remove with the `migration` package.
     var showCleartextWarning by remember { mutableStateOf(false) }
     var exportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showDeleteCloudDialog by remember { mutableStateOf(false) }
 
     // Google Sign-In launcher
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -204,6 +206,30 @@ fun SettingsScreen(
             onConfirm = { password ->
                 exportUri = null
                 viewModel.onExport(uri, password)
+            }
+        )
+    }
+
+    if (showDeleteCloudDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteCloudDialog = false },
+            title = { Text("Delete the cloud copy?") },
+            text = {
+                Text(
+                    "This removes every encrypted entry and the vault settings from your " +
+                        "Google account, and turns sync off.\n\n" +
+                        "The vault on this device is not touched. Any other device still " +
+                        "syncing will keep its own copy until it next tries to sync."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteCloudDialog = false
+                    viewModel.onDisableSync(deleteRemote = true)
+                }) { Text("Delete cloud copy") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteCloudDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -496,56 +522,75 @@ fun SettingsScreen(
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    if (uiState.isSignedInWithGoogle) {
-                        Text("Signed in with Google", style = MaterialTheme.typography.bodyLarge)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            uiState.googleEmail ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val displayName = uiState.googleDisplayName
-                        if (!displayName.isNullOrEmpty()) {
-                            Text(
-                                displayName,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                    // "Local only" is now a fact rather than a hope. Sync used to upload
+                    // the vault to an anonymous account on any sync call while this text
+                    // claimed nothing left the device (#15).
+                    Text(
+                        when {
+                            uiState.syncEnabled -> "Syncing to ${uiState.googleEmail ?: "your account"}"
+                            uiState.isSignedInWithGoogle -> "Signed in, sync off"
+                            else -> "Local only"
+                        },
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        when {
+                            uiState.syncEnabled ->
+                                "Encrypted entries are copied to your Google account. " +
+                                    "Only encrypted blobs leave this device."
+                            uiState.isSignedInWithGoogle ->
+                                "Nothing has been uploaded. Turn on sync to copy your " +
+                                    "encrypted vault to your account."
+                            else ->
+                                "Nothing leaves this device. Sign in and turn on sync to " +
+                                    "copy your encrypted vault across devices."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (!uiState.isSignedInWithGoogle) {
+                        Button(
+                            onClick = { googleSignInLauncher.launch(viewModel.getGoogleSignInIntent()) },
+                            enabled = !uiState.isLoading,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Sign in with Google") }
+                    } else if (!uiState.syncEnabled) {
+                        Button(
+                            onClick = { viewModel.onEnableSync() },
+                            enabled = !uiState.isLoading,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Turn on cloud sync") }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            "Your vault is synced across devices signed in with this Google account.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
                         OutlinedButton(
                             onClick = { viewModel.onSignOutGoogle() },
                             enabled = !uiState.isLoading,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Sign Out")
-                        }
+                        ) { Text("Sign out") }
                     } else {
-                        Text("Local only", style = MaterialTheme.typography.bodyLarge)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Sign in with Google to sync your vault across devices. " +
-                                "Your passwords remain encrypted — Google only stores encrypted blobs.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
                         Button(
-                            onClick = {
-                                val intent = viewModel.getGoogleSignInIntent()
-                                googleSignInLauncher.launch(intent)
-                            },
+                            onClick = { viewModel.onSyncNow() },
                             enabled = !uiState.isLoading,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Sign in with Google")
-                        }
+                        ) { Text("Sync now") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { viewModel.onDisableSync(deleteRemote = false) },
+                            enabled = !uiState.isLoading,
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Turn off sync") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = { showDeleteCloudDialog = true },
+                            enabled = !uiState.isLoading,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Turn off and delete cloud copy") }
                     }
                 }
             }

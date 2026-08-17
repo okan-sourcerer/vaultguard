@@ -46,8 +46,11 @@ class CredentialRepositoryImpl @Inject constructor(
     }
 
     override suspend fun save(credential: Credential) {
-        val now = System.currentTimeMillis()
         val existing = credentialDao.getById(credential.id)
+        // Forced forward past the previous value. Sync treats a row as needing a push when
+        // updatedAt > syncedAt, so a backwards clock could otherwise leave an edited row
+        // looking already-synced and it would never be uploaded.
+        val now = monotonicNow(existing?.updatedAt)
         val json = CredentialPayloadCodec.encode(credential)
         val key = masterPasswordManager.getSessionKey()
         val plaintextBytes = json.toByteArray(Charsets.UTF_8)
@@ -164,6 +167,12 @@ class CredentialRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             Decrypted.Failure(e.message ?: e::class.java.simpleName)
         }
+    }
+
+    /** Wall clock, but never earlier than [previous]. */
+    private fun monotonicNow(previous: Long?): Long {
+        val now = System.currentTimeMillis()
+        return if (previous != null && previous >= now) previous + 1 else now
     }
 
     private sealed interface Decrypted {
