@@ -42,6 +42,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -53,6 +57,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
@@ -68,12 +74,37 @@ fun VaultScreen(
     onAddClick: () -> Unit,
     onGeneratorClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    deletedCredentialId: StateFlow<String?> = MutableStateFlow(null),
+    onDeletionHandled: () -> Unit = {},
     viewModel: VaultViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Deleting used to be final the moment it was confirmed, with the row kept as a
+    // tombstone nothing could reach — the safety of a soft delete without the benefit
+    // (finding #59). The undo offer is that benefit; letting it go is what makes the
+    // deletion real.
+    val justDeleted by deletedCredentialId.collectAsState()
+    LaunchedEffect(justDeleted) {
+        val id = justDeleted ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "Credential deleted",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Long
+        )
+        when (result) {
+            SnackbarResult.ActionPerformed -> viewModel.onUndoDelete(id)
+            // Dismissed, or timed out. If the process dies first the row simply stays a
+            // tombstone, which is where it was before this existed.
+            SnackbarResult.Dismissed -> viewModel.onFinaliseDelete(id)
+        }
+        onDeletionHandled()
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("VaultGuard") },

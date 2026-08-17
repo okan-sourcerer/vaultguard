@@ -32,6 +32,21 @@ interface CredentialDao {
     @Query("UPDATE credentials SET isDeleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDelete(id: String, now: Long = System.currentTimeMillis())
 
+    /** Reverses [softDelete] while the undo offer is still on screen (#59). */
+    @Query("UPDATE credentials SET isDeleted = 0, updatedAt = :now WHERE id = :id")
+    suspend fun undoSoftDelete(id: String, now: Long = System.currentTimeMillis())
+
+    /**
+     * Drops a tombstone outright, once the user has let the undo offer go (#59).
+     *
+     * The `syncedAt IS NULL` guard is the whole point and is enforced in SQL so it cannot
+     * race: a row the cloud has never seen owes nobody a tombstone and can simply go. One
+     * that *has* been pushed must stay until [getPurgeableTombstones] has confirmed the
+     * deletion travelled, or the other side would resurrect it on the next pull (#24).
+     */
+    @Query("DELETE FROM credentials WHERE id = :id AND isDeleted = 1 AND syncedAt IS NULL")
+    suspend fun hardDeleteIfNeverSynced(id: String)
+
     /**
      * Rows changed since they were last pushed.
      *

@@ -20,4 +20,16 @@ interface CredentialRepository {
 
     suspend fun delete(id: String)
 
+    /**
+     * Puts back an entry deleted a moment ago, while the undo offer is still up (#59).
+     */
+    suspend fun undoDelete(id: String)
+
+    /**
+     * Called once the undo offer has gone, to stop a deleted entry lingering as a row the
+     * user can neither see nor reach. Only removes it outright when the cloud has never
+     * seen it; a pushed row keeps its tombstone until sync has carried the deletion.
+     */
+    suspend fun finaliseDelete(id: String)
+
 }

@@ -54,6 +54,7 @@ import java.util.Locale
 fun CredentialDetailScreen(
     onNavigateBack: () -> Unit,
     onEditClick: (String) -> Unit,
+    onDeleted: (String) -> Unit = { onNavigateBack() },
     viewModel: CredentialDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -67,7 +68,7 @@ fun CredentialDetailScreen(
     }
 
     LaunchedEffect(uiState.isDeleted) {
-        if (uiState.isDeleted) onNavigateBack()
+        if (uiState.isDeleted) onDeleted(viewModel.credentialId)
     }
 
     if (showDeleteDialog) {

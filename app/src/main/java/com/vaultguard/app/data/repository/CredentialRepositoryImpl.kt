@@ -99,6 +99,14 @@ class CredentialRepositoryImpl @Inject constructor(
         credentialDao.softDelete(id)
     }
 
+    override suspend fun undoDelete(id: String) {
+        credentialDao.undoSoftDelete(id)
+    }
+
+    override suspend fun finaliseDelete(id: String) {
+        credentialDao.hardDeleteIfNeverSynced(id)
+    }
+
     /**
      * Decrypts a batch, keeping the failures rather than discarding them.
      *

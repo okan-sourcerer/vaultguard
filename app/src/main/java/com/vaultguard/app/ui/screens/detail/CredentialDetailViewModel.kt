@@ -36,7 +36,8 @@ class CredentialDetailViewModel @Inject constructor(
     private val clipboard: SecureClipboard
 ) : ViewModel() {
 
-    private val credentialId: String = checkNotNull(savedStateHandle["id"])
+    /** Public so the screen can name the entry it just deleted when offering undo (#59). */
+    val credentialId: String = checkNotNull(savedStateHandle["id"])
 
     private val _uiState = MutableStateFlow(DetailUiState())
     val uiState: StateFlow<DetailUiState> = _uiState

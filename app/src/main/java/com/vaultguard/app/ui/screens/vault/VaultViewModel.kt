@@ -155,6 +155,16 @@ class VaultViewModel @Inject constructor(
         }
     }
 
+    /** Puts back an entry while the undo offer is still on screen (#59). */
+    fun onUndoDelete(id: String) {
+        viewModelScope.launch { credentialRepository.undoDelete(id) }
+    }
+
+    /** The undo offer has gone; stop the entry lingering as an unreachable row (#59). */
+    fun onFinaliseDelete(id: String) {
+        viewModelScope.launch { credentialRepository.finaliseDelete(id) }
+    }
+
     fun onDismissError() {
         error.value = null
     }

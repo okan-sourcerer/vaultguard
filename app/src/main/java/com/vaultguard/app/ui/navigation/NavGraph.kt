@@ -19,7 +19,13 @@ import com.vaultguard.app.ui.screens.vault.VaultScreen
 sealed class Screen(val route: String) {
     data object Setup : Screen("setup")
     data object Unlock : Screen("unlock")
-    data object Vault : Screen("vault")
+    data object Vault : Screen("vault") {
+        /**
+         * Id of an entry just deleted from the detail screen, handed back so the list can
+         * offer to undo it (#59). Same mechanism as [Generator.RESULT_KEY].
+         */
+        const val DELETED_KEY = "deleted_credential_id"
+    }
     data object AddEdit : Screen("add_edit?id={id}") {
         fun createRoute(id: String? = null) = if (id != null) "add_edit?id=$id" else "add_edit"
     }
@@ -80,7 +86,7 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.Vault.route) {
+        composable(Screen.Vault.route) { entry ->
             LaunchedEffect(Unit) {
                 if (openSettingsOnVaultEntry) {
                     onOpenSettingsHandled()
@@ -89,6 +95,11 @@ fun NavGraph(
             }
 
             VaultScreen(
+                deletedCredentialId = entry.savedStateHandle
+                    .getStateFlow<String?>(Screen.Vault.DELETED_KEY, null),
+                onDeletionHandled = {
+                    entry.savedStateHandle[Screen.Vault.DELETED_KEY] = null
+                },
                 onCredentialClick = { id ->
                     navController.navigate(Screen.Detail.createRoute(id))
                 },
@@ -129,6 +140,12 @@ fun NavGraph(
         ) {
             CredentialDetailScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onDeleted = { id ->
+                    // Hand the id to the list before leaving, so it can offer the undo (#59).
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle?.set(Screen.Vault.DELETED_KEY, id)
+                    navController.popBackStack()
+                },
                 onEditClick = { id ->
                     navController.navigate(Screen.AddEdit.createRoute(id))
                 }
