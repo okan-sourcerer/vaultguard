@@ -23,6 +23,8 @@ import com.vaultguard.app.security.GoogleAuthManager
 import com.vaultguard.app.security.GoogleSignInResult
 import com.vaultguard.app.security.MasterPasswordManager
 import com.vaultguard.app.security.VaultAutoLock
+import com.vaultguard.app.util.MasterPasswordPolicy
+import com.vaultguard.app.util.PasswordStrengthEvaluator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +35,7 @@ import javax.inject.Inject
 data class VaultStats(
     val totalEntries: Int = 0,
     val weakPasswords: Int = 0,
-    val duplicatePasswords: Int = 0,
+    val reusedPasswords: Int = 0,
     val oldPasswords: Int = 0,
     val categoryCounts: Map<String, Int> = emptyMap(),
     /** Rows that exist but could not be decrypted (finding #40). */
@@ -64,6 +66,8 @@ class SettingsViewModel @Inject constructor(
     private val biometricAuthManager: BiometricAuthManager,
     private val vaultAutoLock: VaultAutoLock,
     private val credentialRepository: CredentialRepository,
+    private val strengthEvaluator: PasswordStrengthEvaluator,
+    private val masterPasswordPolicy: MasterPasswordPolicy,
     private val exportVaultUseCase: ExportVaultUseCase,
     private val importVaultUseCase: ImportVaultUseCase,
     // TEMPORARY — cleartext migration aid, remove with the `migration` package.
@@ -89,17 +93,19 @@ class SettingsViewModel @Inject constructor(
                 val now = System.currentTimeMillis()
                 val ninetyDaysMs = 90L * 24 * 60 * 60 * 1000
 
-                val weakPasswords = credentials.count { cred ->
-                    cred.password.length < 8 ||
-                        cred.password.all { it.isLetterOrDigit() } ||
-                        !cred.password.any { it.isUpperCase() } ||
-                        !cred.password.any { it.isDigit() }
-                }
+                // The shared evaluator, not a second opinion. This used to run its own
+                // composition check that called a 40-character generated passphrase weak
+                // for lacking a capital letter, while the evaluator called the same string
+                // VERY_STRONG (finding #26).
+                val weakPasswords = credentials.count { strengthEvaluator(it.password).isWeak }
 
-                val passwordGroups = credentials.groupBy { it.password }
-                val duplicatePasswords = passwordGroups.values
-                    .filter { it.size > 1 }
-                    .sumOf { it.size }
+                // Blank passwords are not "duplicates of each other", and counting the
+                // members of every reuse group reported 2 for one reused password (#30).
+                // This counts the passwords that are reused, not the entries affected.
+                val reusedPasswords = credentials
+                    .filter { it.password.isNotBlank() }
+                    .groupBy { it.password }
+                    .count { (_, group) -> group.size > 1 }
 
                 // passwordChangedAt, not updatedAt — a pin toggle is not a rotation (#29).
                 val oldPasswords = credentials.count { (now - it.passwordChangedAt) > ninetyDaysMs }
@@ -113,7 +119,7 @@ class SettingsViewModel @Inject constructor(
                     vaultStats = VaultStats(
                         totalEntries = credentials.size,
                         weakPasswords = weakPasswords,
-                        duplicatePasswords = duplicatePasswords,
+                        reusedPasswords = reusedPasswords,
                         oldPasswords = oldPasswords,
                         categoryCounts = categoryCounts,
                         undecryptableEntries = snapshot.undecryptableCount
@@ -129,6 +135,7 @@ class SettingsViewModel @Inject constructor(
         val bioEnabled = biometricAuthManager.isBiometricEnabled
         Log.d("SettingsVM", "refreshState: biometricAvailable=$bioAvailable, biometricEnabled=$bioEnabled")
         _uiState.value = _uiState.value.copy(
+            autoLockTimeout = vaultAutoLock.timeoutMinutes,
             biometricAvailable = bioAvailable,
             biometricEnabled = bioEnabled,
             autofillSupported = autofillManager?.isAutofillSupported == true,
@@ -243,6 +250,14 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    fun validateNewMasterPassword(
+        newPassword: String,
+        confirmation: String,
+        currentPassword: String
+    ): String? =
+        (masterPasswordPolicy.validate(newPassword, confirmation, currentPassword)
+            as? MasterPasswordPolicy.Result.Rejected)?.reason
 
     fun onChangeMasterPassword(currentPassword: String, newPassword: String) {
         viewModelScope.launch {

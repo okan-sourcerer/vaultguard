@@ -25,7 +25,16 @@ sealed class Screen(val route: String) {
     data object Detail : Screen("detail/{id}") {
         fun createRoute(id: String) = "detail/$id"
     }
-    data object Generator : Screen("generator")
+    data object Generator : Screen("generator?forResult={forResult}") {
+        /**
+         * [forResult] makes the generator offer a "Use this password" button that hands
+         * the result back to Add/Edit. Without it the screen is just a standalone tool.
+         */
+        fun createRoute(forResult: Boolean = false) = "generator?forResult=$forResult"
+
+        /** Key under which the chosen password is handed to the previous screen. */
+        const val RESULT_KEY = "generated_password"
+    }
     data object Settings : Screen("settings")
 
     /** Shown when vault.db exists but cannot be decrypted (finding #1). */
@@ -71,7 +80,7 @@ fun NavGraph(
                     navController.navigate(Screen.AddEdit.createRoute())
                 },
                 onGeneratorClick = {
-                    navController.navigate(Screen.Generator.route)
+                    navController.navigate(Screen.Generator.createRoute())
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
@@ -85,7 +94,16 @@ fun NavGraph(
         ) {
             AddEditScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onGeneratePassword = { navController.navigate(Screen.Generator.route) }
+                onGeneratePassword = {
+                    navController.navigate(Screen.Generator.createRoute(forResult = true))
+                },
+                // Compose Navigation hands results back through the *previous* entry's
+                // SavedStateHandle. Reading it here keeps that plumbing out of the screen.
+                generatedPassword = it.savedStateHandle
+                    .getStateFlow<String?>(Screen.Generator.RESULT_KEY, null),
+                onGeneratedPasswordConsumed = {
+                    it.savedStateHandle[Screen.Generator.RESULT_KEY] = null
+                }
             )
         }
 
@@ -101,9 +119,20 @@ fun NavGraph(
             )
         }
 
-        composable(Screen.Generator.route) {
+        composable(
+            route = Screen.Generator.route,
+            arguments = listOf(
+                navArgument("forResult") { type = NavType.BoolType; defaultValue = false }
+            )
+        ) { entry ->
             PasswordGeneratorScreen(
-                onNavigateBack = { navController.popBackStack() }
+                forResult = entry.arguments?.getBoolean("forResult") == true,
+                onNavigateBack = { navController.popBackStack() },
+                onUsePassword = { password ->
+                    navController.previousBackStackEntry
+                        ?.savedStateHandle?.set(Screen.Generator.RESULT_KEY, password)
+                    navController.popBackStack()
+                }
             )
         }
 

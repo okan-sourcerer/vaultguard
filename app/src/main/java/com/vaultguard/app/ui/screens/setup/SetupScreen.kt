@@ -9,6 +9,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -52,7 +59,8 @@ fun SetupScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "This password protects your entire vault. Choose a strong, memorable password.",
+            text = "This password protects your entire vault. Choose a strong, memorable " +
+                "passphrase — a few unrelated words beats a short mixture of symbols.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -103,15 +111,44 @@ fun SetupScreen(
             )
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // There is no recovery path, no reset, and no escrow. That was never stated
+        // anywhere before the vault was created (finding #39).
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .clickable { viewModel.onAcknowledgeNoRecoveryChange(!uiState.acknowledgedNoRecovery) }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = uiState.acknowledgedNoRecovery,
+                    onCheckedChange = viewModel::onAcknowledgeNoRecoveryChange
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "I understand that if I forget this password, my vault cannot be " +
+                        "recovered. There is no reset and no backup copy of it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick = viewModel::onSetup,
-            enabled = !uiState.isLoading,
+            enabled = !uiState.isLoading && uiState.acknowledgedNoRecovery,
             modifier = Modifier.fillMaxWidth()
         ) {
             if (uiState.isLoading) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
             } else {
                 Text("Create Vault")
             }

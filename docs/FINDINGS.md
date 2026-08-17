@@ -154,21 +154,21 @@ Full analysis in [SYNC.md](SYNC.md).
 
 | # | Defect | Location | Status |
 | --- | --- | --- | --- |
-| 25 | Auto-lock timeout never persisted; silently reverts to 5 min | `security/VaultAutoLock.kt:21` | open |
-| 26 | Two contradictory definitions of "weak password" | `settings/SettingsViewModel.kt:79-84` vs `util/PasswordStrengthEvaluator.kt` | open |
-| 27 | Strength evaluator has no dictionary check (`Password1!` → STRONG) | `util/PasswordStrengthEvaluator.kt` | open |
-| 28 | Setup and change-password enforce different rules | `SetupViewModel.kt:52-65` vs `SettingsScreen.kt:517-522` | open |
+| 25 | Auto-lock timeout never persisted; silently reverts to 5 min | `security/VaultAutoLock.kt:21` | **fixed** (chunk 11) |
+| 26 | Two contradictory definitions of "weak password" | `settings/SettingsViewModel.kt:79-84` vs `util/PasswordStrengthEvaluator.kt` | **fixed** (chunk 11) |
+| 27 | Strength evaluator has no dictionary check (`Password1!` → STRONG) | `util/PasswordStrengthEvaluator.kt` | **fixed** (chunk 11) |
+| 28 | Setup and change-password enforce different rules | `SetupViewModel.kt:52-65` vs `SettingsScreen.kt:517-522` | **fixed** (chunk 11) |
 | 29 | "Password age" actually means "last edited" | `detail/CredentialDetailScreen.kt:211-251` | **fixed** (chunk 6) |
-| 30 | Duplicate-password count inflated; empty passwords grouped | `settings/SettingsViewModel.kt:86-89` | open |
+| 30 | Duplicate-password count inflated; empty passwords grouped | `settings/SettingsViewModel.kt:86-89` | **fixed** (chunk 11) |
 | 31 | Wrong password in autofill unlock gives zero feedback | `autofill/AutofillAuthActivity.kt:128-131` | **fixed** (chunk 3) |
 | 32 | Biometric failure/cancel is silent | `unlock/UnlockViewModel.kt:73-80` | **fixed** (chunk 3) |
-| 33 | Generator cannot return a password to Add/Edit | `NavGraph.kt:80`, `AddEditScreen.kt:50` | open |
+| 33 | Generator cannot return a password to Add/Edit | `NavGraph.kt:80`, `AddEditScreen.kt:50` | **fixed** (chunk 11) |
 | 34 | Autofill "Skip" is permanent and irreversible | `autofill/AutofillDismissedPrefs.kt` | **fixed** (chunk 8) |
 | 35 | Save activity discards the credential if the vault is locked | `autofill/AutofillSaveActivity.kt:74-77` | **fixed** (chunk 8) |
-| 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | open |
+| 36 | Clipboard worker wipes whatever was copied since | `security/ClipboardManager.kt:49-57` | **fixed** (chunk 11) |
 | 37 | Autofill toggle in Settings cannot turn autofill off | `settings/SettingsScreen.kt:288-306` | **fixed** (chunk 8a) |
 | 38 | Blank detail screen / infinite spinner on missing credential | `CredentialDetailScreen.kt:113`, `AddEditViewModel.kt:73` | **fixed** (chunk 3) |
-| 39 | No "forgetting this loses everything" warning at setup | `setup/SetupScreen.kt` | open |
+| 39 | No "forgetting this loses everything" warning at setup | `setup/SetupScreen.kt` | **fixed** (chunk 11) |
 | 40 | A locked or unreadable vault renders as an empty vault | `data/repository/CredentialRepositoryImpl.kt:83-96` | **fixed** (chunk 3) |
 
 **#40 is the force multiplier.** `decryptEntity` swallows every exception into `null` and
@@ -176,8 +176,14 @@ Full analysis in [SYNC.md](SYNC.md).
 user as "No credentials yet. Tap + to add one." Fixing it early makes every subsequent fix
 verifiable.
 
-**#26** — Vault Stats counts a 40-character generated passphrase as weak if it lacks an
-uppercase letter, while the entropy evaluator calls the same string VERY_STRONG.
+**#26** — Vault Stats counted a 40-character generated passphrase as weak for lacking an
+uppercase letter, while the entropy evaluator called the same string VERY_STRONG. Stats now
+call the evaluator; there is one definition.
+
+**#27** — the evaluator now checks a list of commonly guessed passwords before doing any
+arithmetic, matching against a normalised form so `P@ssw0rd123!` reduces to `password`. It
+also refuses to call anything strong that uses three or fewer distinct characters, however
+long — `aaaaaaaaaaaaaaaa` computed to 75 bits.
 
 **#29** — `updatedAt` is bumped by editing notes, toggling a pin, or the master-password
 re-encryption sweep. Pinning an entry resets its displayed "password age" to *Today*.

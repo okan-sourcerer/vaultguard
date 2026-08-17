@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vaultguard.app.data.remote.FirebaseSyncService
 import com.vaultguard.app.security.MasterPasswordManager
+import com.vaultguard.app.util.MasterPasswordPolicy
 import com.vaultguard.app.util.PasswordStrength
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.app.util.StrengthLevel
@@ -19,13 +20,16 @@ data class SetupUiState(
     val strength: PasswordStrength = PasswordStrength(0, StrengthLevel.WEAK, 0.0),
     val error: String? = null,
     val isLoading: Boolean = false,
-    val isComplete: Boolean = false
+    val isComplete: Boolean = false,
+    /** There is no recovery path, so the user has to say they know that (#39). */
+    val acknowledgedNoRecovery: Boolean = false
 )
 
 @HiltViewModel
 class SetupViewModel @Inject constructor(
     private val masterPasswordManager: MasterPasswordManager,
     private val strengthEvaluator: PasswordStrengthEvaluator,
+    private val policy: MasterPasswordPolicy,
     private val syncService: FirebaseSyncService
 ) : ViewModel() {
 
@@ -47,21 +51,24 @@ class SetupViewModel @Inject constructor(
         )
     }
 
+    fun onAcknowledgeNoRecoveryChange(acknowledged: Boolean) {
+        _uiState.value = _uiState.value.copy(acknowledgedNoRecovery = acknowledged)
+    }
+
     fun onSetup() {
         val state = _uiState.value
-        when {
-            state.password.length < 8 -> {
-                _uiState.value = state.copy(error = "Password must be at least 8 characters")
-                return
-            }
-            state.password != state.confirmPassword -> {
-                _uiState.value = state.copy(error = "Passwords do not match")
-                return
-            }
-            state.strength.level == StrengthLevel.WEAK -> {
-                _uiState.value = state.copy(error = "Password is too weak")
-                return
-            }
+
+        // Shared with the change-password dialog; the two used to disagree (finding #28).
+        val validation = policy.validate(state.password, state.confirmPassword)
+        if (validation is MasterPasswordPolicy.Result.Rejected) {
+            _uiState.value = state.copy(error = validation.reason)
+            return
+        }
+        if (!state.acknowledgedNoRecovery) {
+            _uiState.value = state.copy(
+                error = "Please confirm you understand the password cannot be recovered."
+            )
+            return
         }
 
         viewModelScope.launch {

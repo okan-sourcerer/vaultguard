@@ -158,6 +158,7 @@ fun SettingsScreen(
     // Change password dialog
     if (showChangePasswordDialog) {
         ChangePasswordDialog(
+            validate = viewModel::validateNewMasterPassword,
             onDismiss = { showChangePasswordDialog = false },
             onConfirm = { current, new ->
                 showChangePasswordDialog = false
@@ -618,10 +619,10 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.error
                         )
                     }
-                    if (stats.duplicatePasswords > 0) {
+                    if (stats.reusedPasswords > 0) {
                         StatRow(
-                            "Duplicate passwords",
-                            "${stats.duplicatePasswords}",
+                            "Passwords used more than once",
+                            "${stats.reusedPasswords}",
                             color = MaterialTheme.colorScheme.error
                         )
                     }
@@ -674,6 +675,7 @@ fun SettingsScreen(
 @Suppress("AssignedValueIsNeverRead")
 @Composable
 private fun ChangePasswordDialog(
+    validate: (newPassword: String, confirmation: String, currentPassword: String) -> String?,
     onDismiss: () -> Unit,
     onConfirm: (currentPassword: String, newPassword: String) -> Unit
 ) {
@@ -725,12 +727,13 @@ private fun ChangePasswordDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                when {
-                    currentPassword.isEmpty() -> error = "Enter current password"
-                    newPassword.length < 8 -> error = "New password must be at least 8 characters"
-                    newPassword != confirmPassword -> error = "Passwords do not match"
-                    else -> onConfirm(currentPassword, newPassword)
+                // The same policy setup uses. These two used to disagree, so the vault
+                // could be moved to a password setup would have refused (finding #28).
+                error = when {
+                    currentPassword.isEmpty() -> "Enter your current password"
+                    else -> validate(newPassword, confirmPassword, currentPassword)
                 }
+                if (error == null) onConfirm(currentPassword, newPassword)
             }) { Text("Change") }
         },
         dismissButton = {

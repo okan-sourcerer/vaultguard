@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +54,8 @@ import com.vaultguard.app.ui.components.PasswordStrengthIndicator
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PasswordGeneratorScreen(
+    forResult: Boolean = false,
+    onUsePassword: (String) -> Unit = {},
     onNavigateBack: () -> Unit,
     viewModel: PasswordGeneratorViewModel = hiltViewModel()
 ) {
@@ -218,6 +221,17 @@ fun PasswordGeneratorScreen(
                         }
                     }
                 }
+            }
+
+            // Only when Add/Edit sent us here. Opened from the vault toolbar the generator
+            // is a standalone tool and has nowhere to hand a password back to.
+            if (forResult) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { onUsePassword(uiState.password) },
+                    enabled = uiState.password.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Use this password") }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
