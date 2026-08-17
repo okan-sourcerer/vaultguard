@@ -7,7 +7,7 @@ import com.vaultguard.app.domain.model.Credential
 import com.vaultguard.app.domain.repository.CredentialLookup
 import com.vaultguard.app.domain.repository.CredentialRepository
 import com.vaultguard.app.security.BreachCheckService
-import com.vaultguard.app.security.BreachResult
+import com.vaultguard.app.security.BreachCheckResult
 import com.vaultguard.app.security.SecureClipboard
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +20,7 @@ data class DetailUiState(
     val isLoading: Boolean = true,
     val isDeleted: Boolean = false,
     val error: String? = null,
-    val breachResult: BreachResult? = null,
+    val breachResult: BreachCheckResult? = null,
     val isCheckingBreach: Boolean = false,
     /** Set when the row is gone or unreadable, so the screen can say so (finding #38). */
     val unavailable: Unavailable? = null

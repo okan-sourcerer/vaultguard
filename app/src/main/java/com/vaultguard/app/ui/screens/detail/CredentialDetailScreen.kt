@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.vaultguard.app.security.BreachCheckResult
 import com.vaultguard.app.ui.components.ConfirmDialog
 import com.vaultguard.app.ui.components.PasswordField
 import java.text.SimpleDateFormat
@@ -204,21 +205,35 @@ fun CredentialDetailScreen(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     uiState.breachResult?.let { result ->
-                        if (result.isBreached) {
-                            Text(
-                                text = "Found in ${result.occurrences} breaches!",
+                        when (result) {
+                            is BreachCheckResult.Breached -> Text(
+                                text = "Found in ${result.occurrences} breaches — change it",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall
                             )
-                        } else {
-                            Text(
-                                text = "Not found in any breaches",
+                            BreachCheckResult.Safe -> Text(
+                                text = "Not found in known breaches",
                                 color = MaterialTheme.colorScheme.tertiary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            // Neither green nor red: the check did not happen, and saying
+                            // "not breached" here was the whole of finding #14.
+                            is BreachCheckResult.Unavailable -> Text(
+                                text = "Could not check — ${result.reason}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Sends the first five characters of this password's SHA-1 hash to " +
+                        "Have I Been Pwned. The password itself never leaves the device.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 if (credential.notes.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(16.dp))

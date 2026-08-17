@@ -166,7 +166,7 @@ is why `UnlockVaultUseCase` probes one when the two could disagree.
 | Screenshots, recents thumbnail | `FLAG_SECURE` on every activity that shows a password or takes the master password |
 | Clipboard scraping | Sensitive-clip flag, WorkManager clear after 30 s (#36 — clears indiscriminately) |
 | Lookalike domains and hostile package names in autofill | One matcher for both paths; hosts compared on dot boundaries, packages by explicit link or reverse-DNS derivation |
-| Password reuse against known breaches | HIBP k-anonymity range query; only a 5-char SHA-1 prefix is sent |
+| Password reuse against known breaches | HIBP k-anonymity range query; only a 5-char SHA-1 prefix is sent, and a failed check reports as unavailable rather than clean |
 | Cloud provider reading the vault | Only ciphertext and IVs reach Firestore; the salt is stored but useless alone |
 | Brute-forcing the master password offline | Argon2id at 64 MiB makes GPU attack expensive |
 

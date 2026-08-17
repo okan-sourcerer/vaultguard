@@ -4,6 +4,8 @@ import android.content.Context
 import com.vaultguard.app.security.BiometricAuthManager
 import com.vaultguard.app.security.BiometricKeystore
 import com.vaultguard.app.security.EncryptedSharedPrefs
+import com.vaultguard.app.security.HttpPwnedRangeSource
+import com.vaultguard.app.security.PwnedRangeSource
 import com.vaultguard.app.security.KeystoreManager
 import com.vaultguard.app.security.MasterPasswordManager
 import com.vaultguard.app.security.SecurePrefs
@@ -29,6 +31,10 @@ object SecurityModule {
     @Singleton
     fun provideBiometricKeystore(keystoreManager: KeystoreManager): BiometricKeystore =
         keystoreManager
+
+    @Provides
+    @Singleton
+    fun providePwnedRangeSource(source: HttpPwnedRangeSource): PwnedRangeSource = source
 
     @Provides
     @Singleton

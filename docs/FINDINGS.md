@@ -68,7 +68,7 @@ reports true.
 | 11 | Locked-vault autofill uses looser matching and auto-fills first match | `autofill/AutofillAuthActivity.kt:161-194` | **fixed** (chunk 8) |
 | 12 | Brute-force backoff caps at 32 s and resets on restart | `unlock/UnlockViewModel.kt:82-98` | **fixed** (chunk 9) |
 | 13 | `FLAG_SECURE` missing on both autofill activities | `MainActivity.kt:35` only | **fixed** (chunk 8) |
-| 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | open |
+| 14 | Breach check reports "not breached" on network failure | `security/BreachCheckService.kt:45-48` | **fixed** (chunk 13) |
 | 15 | Vault uploads to Firebase without consent while UI says "Local only" | `vault/VaultViewModel.kt:139-150` | **fixed** (chunk 10) |
 | 16 | Sign-out claims sync disabled, re-enables it anonymously | `security/GoogleAuthManager.kt:97-101` | **fixed** (chunk 10) |
 | 17 | Argon2 runs on the main thread | `SetupViewModel.kt:70`, `UnlockViewModel.kt:55`, `AutofillAuthActivity.kt:128` | **fixed** (chunk 5) |
@@ -98,9 +98,16 @@ and applied inside `UnlockVaultUseCase` so every unlock path inherits it. It is 
 not a boundary — the lockout is wall-clock based, so anyone able to change the device clock
 can shorten it. The real cost of a guess is Argon2id.
 
-**#14** — the catch block's own comment says "report unknown", but `BreachResult` has no
-unknown state, so it returns `isBreached = false` and the UI prints a green all-clear.
-Non-200 responses behave the same.
+**#14** — the catch block's own comment said "report unknown", but `BreachResult` had no
+unknown state, so it returned `isBreached = false` and the UI printed a green all-clear.
+Non-200 responses behaved the same, because they were turned into an empty body.
+
+`BreachCheckResult` now distinguishes Breached, Safe and **Unavailable**, and the screen
+renders the third in neutral grey rather than green. The range fetch moved behind
+`PwnedRangeSource` so the parsing and error mapping are testable without a network — which
+also surfaced that padding entries were never filtered: `Add-Padding` mixes in decoy
+suffixes carrying a count of zero, and matching one would have reported a password as
+breached zero times.
 
 ## P1b — Autofill usability
 

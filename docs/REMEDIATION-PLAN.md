@@ -406,4 +406,5 @@ properly; rename `ClipboardManager.kt`; delete dead code.
 | 10 — Sync rework | #19–#24, #4, #15, #16 | **done** — 17 tests |
 | 11 — Business logic + UX | #25–#28, #30, #33, #36, #39 | **done** — 24 tests |
 | 12 — Build + hygiene | #41–#46 | **done** — release build verified |
-| 13 — Usability pass | #50, #51, #53 and whatever it turns up | not started |
+| 13 — Breach check honesty | #14 | **done** — 15 tests |
+| 14 — Usability pass | #50, #51, #53 and whatever it turns up | not started |
