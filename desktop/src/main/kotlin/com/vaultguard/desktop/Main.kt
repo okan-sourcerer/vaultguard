@@ -7,6 +7,8 @@ import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.desktop.cloud.DesktopConfig
 import com.vaultguard.desktop.cloud.SavedSession
+import com.vaultguard.desktop.service.BridgeInstall
+import com.vaultguard.desktop.service.NativeHost
 import com.vaultguard.desktop.service.runTrayService
 import java.io.File
 import java.util.UUID
@@ -20,6 +22,8 @@ vaultguard --cloud          open the Firestore vault your phone publishes
 vaultguard --cloud-setup    write a configuration template for --cloud
 vaultguard --cloud-signout  forget the saved sign-in
 vaultguard --service        run in the system tray
+vaultguard --install-bridge [chrome-extension-id]
+                            register the browser native-messaging host
 
 File mode opens a backup, or starts a new vault if the file does not exist yet.
 Generate passwords, add entries, and write the file back out. Nothing reaches the
@@ -40,17 +44,25 @@ key, so the file is inert without it.
 """.trim()
 
 fun main(args: Array<String>) {
-    if (args.size != 1 || args[0] in setOf("-h", "--help", "help")) {
+    if (args.isEmpty() || args[0] in setOf("-h", "--help", "help")) {
         println(USAGE)
         return
     }
 
     when (args[0]) {
+        // Started by the browser, never by a person. Nothing may be printed to stdout on
+        // this path: the stream is a framed protocol and a stray line corrupts it.
+        "--native-host" -> NativeHost.run()
+        "--install-bridge" -> installBridge(args.getOrNull(1))
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
         "--cloud-signout" -> cloudSignOut()
         "--service" -> runTrayService()
         else -> {
+            if (args.size != 1) {
+                println(USAGE)
+                return
+            }
             val file = File(args[0])
             val vault = openOrCreate(file) ?: return
             Session(file, vault).run()
@@ -68,6 +80,27 @@ private fun cloudSetup() {
     }
     println()
     println(DesktopConfig.template)
+}
+
+private fun installBridge(chromeExtensionId: String?) {
+    val launcher = File(
+        File(System.getProperty("user.dir")),
+        if (System.getProperty("os.name").orEmpty().lowercase().contains("win")) {
+            "desktop/build/install/vaultguard/bin/vaultguard.bat"
+        } else {
+            "desktop/build/install/vaultguard/bin/vaultguard"
+        }
+    )
+
+    println("Registering the native messaging host.")
+    println()
+    BridgeInstall.install(chromeExtensionId, launcher).forEach { println(it) }
+    println()
+    println("The host manifest points at the launcher above. On Windows the browsers find")
+    println("it through the registry, so run the `reg add` line(s) printed above yourself —")
+    println("they change your browser configuration and are yours to make knowingly.")
+    println()
+    println("The launcher must pass --native-host through. If you moved it, re-run this.")
 }
 
 private fun cloudSignOut() {

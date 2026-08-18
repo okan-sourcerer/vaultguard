@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "VaultGuard",
+  "version": "1.0.0",
+  "description": "Fills passwords from your VaultGuard vault, via the VaultGuard desktop service.",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VaultGuard"
+  },
+  "background": {
+    "scripts": [
+      "browser-polyfill.js",
+      "background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vaultguard@vaultguard.local",
+      "strict_min_version": "115.0"
+    }
+  }
+}

@@ -26,7 +26,10 @@ import javax.swing.SwingUtilities
  *
  * Nothing here holds a key, a password or a credential.
  */
-class TrayApp(private val service: VaultService) {
+class TrayApp(
+    private val service: VaultService,
+    private val bridge: BridgeServer = BridgeServer(service)
+) {
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")
@@ -72,6 +75,11 @@ class TrayApp(private val service: VaultService) {
         refreshItem.addActionListener { worker.submit { refresh() } }
         lockItem.addActionListener { worker.submit { lockNow() } }
         signOutItem.addActionListener { worker.submit { signOut() } }
+
+        // Started before the icon appears, so a browser that is already open finds the
+        // bridge the moment the tray does.
+        runCatching { bridge.start() }
+            .onFailure { System.err.println("Could not open the browser bridge: ${it.message}") }
 
         SystemTray.getSystemTray().add(trayIcon)
         service.onStateChanged = { render() }
@@ -124,6 +132,7 @@ class TrayApp(private val service: VaultService) {
 
     private fun quit() {
         service.lock()
+        bridge.stop()
         runCatching { SystemTray.getSystemTray().remove(trayIcon) }
         worker.shutdownNow()
         ticker.shutdownNow()

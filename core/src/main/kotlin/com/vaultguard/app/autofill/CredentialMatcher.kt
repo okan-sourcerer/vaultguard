@@ -19,6 +19,15 @@ import com.vaultguard.app.domain.model.Credential
  * Both the service and the unlock activity go through here. They previously carried
  * separate implementations that had drifted, with the looser of the two guarding the more
  * sensitive path.
+ *
+ * It lives in `:core` because there is now a third caller: the browser extension asks the
+ * desktop service which credentials may be offered for a page. That answer must come from
+ * this code and not from a matcher written again in JavaScript — a second implementation of
+ * *this* function is how #10 and #11 happened, and a lookalike-domain hole in a browser is
+ * worse than one in an app.
+ *
+ * `FieldClassifier` stays in `:app`: it needs `android.text.InputType`, and it answers a
+ * different question — which field is which, rather than which credential belongs here.
  */
 object CredentialMatcher {
 
