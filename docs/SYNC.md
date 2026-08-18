@@ -118,6 +118,17 @@ administrator — can mount an **offline brute-force attack on the master passwo
 the verification blob, at Argon2id cost per guess.
 
 This is inherent to storing the config remotely for cross-device unlock, and it is the
-reason the Argon2 parameters in [SECURITY.md](SECURITY.md) must not be weakened. Firestore
-security rules restricting `vaults/{uid}` to `request.auth.uid == uid` are load-bearing
-and should be verified in the console — they are not currently checked into this repo.
+reason the Argon2 parameters in [SECURITY.md](SECURITY.md) must not be weakened.
+
+The rules that restrict `vaults/{uid}` to `request.auth.uid == uid` are load-bearing, and
+they now live in [`firestore.rules`](../firestore.rules) at the repository root rather than
+only in the console. Two things about them are worth knowing:
+
+- **Rules do not cascade into subcollections.** `vaults/{uid}` and
+  `vaults/{uid}/credentials/{id}` need separate blocks. A rule covering only the parent
+  denies every credential read, and that presents as a vault that opens and holds nothing.
+- **A project left in test mode allows unauthenticated access** until its expiry date, and
+  denies everything after it. Either state is wrong here: the first exposes every vault in
+  the project, the second breaks sync on a date nobody remembers.
+
+Deploy with `firebase deploy --only firestore:rules`, or paste the file into the console.

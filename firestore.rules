@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// VaultGuard Firestore security rules.
+//
+// These are load-bearing. The vault document stores the salt and the verification blob,
+// so read access to someone's vault permits an offline brute-force attack on their master
+// password at Argon2id cost per guess (see docs/SYNC.md). The rules are what stand between
+// one account's vault and every other account in the project.
+//
+// Deploy:  firebase deploy --only firestore:rules
+// or paste into the Firebase console under Firestore Database -> Rules.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A vault belongs to exactly one account. The path itself carries the owner, so
+    // ownership cannot drift out of step with a field somebody forgot to set.
+    //
+    // `request.auth != null` is redundant against `request.auth.uid == uid` — an
+    // unauthenticated request evaluates the comparison to false rather than erroring — but
+    // it states the requirement rather than relying on how a null propagates.
+    match /vaults/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // Rules do NOT cascade to subcollections. Without this block the credential
+      // documents match no rule and are denied, and the failure presents as a vault that
+      // signs in, shows its config, and holds nothing — which is the one failure mode this
+      // codebase refuses to tolerate silently (see finding #40).
+      match /credentials/{credentialId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Anything not matched above. Firestore already denies unmatched paths, and rules are
+    // OR-ed so this cannot override an allow — it is a statement of intent for whoever
+    // adds a collection next, not an enforcement mechanism.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
