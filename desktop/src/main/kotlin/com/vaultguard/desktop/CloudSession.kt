@@ -1,7 +1,9 @@
 package com.vaultguard.desktop
 
 import com.vaultguard.app.domain.model.Credential
+import com.vaultguard.app.domain.model.PasswordGeneratorConfig
 import com.vaultguard.app.domain.repository.VaultSnapshot
+import com.vaultguard.app.domain.usecase.GeneratePasswordUseCase
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.desktop.cloud.CloudVault
 import com.vaultguard.desktop.cloud.DesktopConfig
@@ -9,15 +11,17 @@ import com.vaultguard.desktop.cloud.FirebaseSignIn
 import com.vaultguard.desktop.cloud.FirestoreClient
 import com.vaultguard.desktop.cloud.GoogleOAuth
 import com.vaultguard.desktop.cloud.RemoteVaultCodec
+import java.util.UUID
 
 private val evaluator = PasswordStrengthEvaluator()
+private val generator = GeneratePasswordUseCase()
 
 /**
- * Read-only cloud mode: sign in, fetch the vault, unlock it, show what is in it.
+ * Cloud mode: sign in, fetch the vault, unlock it, browse it, and add to it.
  *
- * Nothing here writes — not to Firestore, not to disk. That is the deliberate shape of
- * this first version: the whole chain gets exercised against a live vault without being
- * able to damage one.
+ * Adding is the only write, and it can only ever create. Nothing here edits or deletes, so
+ * the two-writer conflict rules are never reached — see `FirestoreClient`. Nothing is
+ * written to disk at any point.
  */
 fun runCloudSession() {
     val config = try {
@@ -98,7 +102,7 @@ fun runCloudSession() {
     println("${rows.size} ${if (rows.size == 1) "row" else "rows"}.")
 
     report(snapshot)
-    CloudBrowser(snapshot).run()
+    CloudBrowser(snapshot, vault, vaultKey, client).run()
 }
 
 /**
@@ -126,10 +130,21 @@ private fun report(snapshot: VaultSnapshot<Credential>) {
     }
 }
 
-private class CloudBrowser(private val snapshot: VaultSnapshot<Credential>) {
+private class CloudBrowser(
+    initial: VaultSnapshot<Credential>,
+    private val vault: CloudVault,
+    private val vaultKey: javax.crypto.SecretKey,
+    private val client: FirestoreClient
+) {
+    /**
+     * Grows as entries are added, so `list` reflects what this session has written without
+     * a second round-trip. Only ever appended to: nothing here can remove or replace an
+     * entry, locally or remotely.
+     */
+    private var snapshot = initial
 
     fun run() {
-        println("Read-only. Type `help` for commands.")
+        println("Type `help` for commands. `add` writes; nothing else does.")
         while (true) {
             print("\nvaultguard(cloud)> ")
             System.out.flush()
@@ -142,6 +157,8 @@ private class CloudBrowser(private val snapshot: VaultSnapshot<Credential>) {
                 "list", "ls" -> list()
                 "show" -> show(parts.getOrNull(1))
                 "find" -> find(parts.drop(1).joinToString(" "))
+                "gen" -> gen(parts.getOrNull(1))
+                "add" -> add()
                 "quit", "exit", "q" -> return
                 else -> println("Unknown command: ${parts[0]}. Try `help`.")
             }
@@ -153,9 +170,12 @@ private class CloudBrowser(private val snapshot: VaultSnapshot<Credential>) {
         list            list entries
         show <n>        show one entry in full, including its password
         find <text>     entries whose name, username or URL contains <text>
+        gen [length]    generate a password without saving it
+        add             create an entry and write it to the cloud vault
         quit            exit
 
-        This session cannot change anything, locally or in the cloud.
+        `add` is the only command that writes, and it can only create. Nothing here
+        edits or deletes, in the cloud or anywhere else.
         """.trimIndent()
     )
 
@@ -184,6 +204,73 @@ private class CloudBrowser(private val snapshot: VaultSnapshot<Credential>) {
         hits.forEach { (index, credential) -> println(line(index, credential)) }
     }
 
+    private fun gen(argument: String?) {
+        val length = argument?.toIntOrNull() ?: PasswordGeneratorConfig().length
+        if (length < 4 || length > 256) {
+            println("Length must be between 4 and 256.")
+            return
+        }
+        val password = generator(PasswordGeneratorConfig(length = length))
+        println("  $password")
+        describe(password)
+    }
+
+    private fun add() {
+        val name = prompt("Site or app name") ?: return
+        if (name.isBlank()) {
+            println("A name is required.")
+            return
+        }
+        val username = prompt("Username") ?: return
+        val url = prompt("URL (optional)") ?: return
+        val supplied = prompt("Password (blank to generate)") ?: return
+
+        val password = supplied.ifBlank {
+            generator(PasswordGeneratorConfig()).also { println("Generated: $it") }
+        }
+        describe(password)
+
+        // The one place this client changes anything that outlives the process. Asked
+        // rather than assumed: the vault on the other end is the real one.
+        print("Write this to the cloud vault? [y/N] ")
+        System.out.flush()
+        if (readlnOrNull()?.trim()?.lowercase() != "y") {
+            println("Nothing written.")
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val credential = Credential(
+            id = UUID.randomUUID().toString(),
+            siteName = name,
+            url = url,
+            username = username,
+            password = password,
+            createdAt = now,
+            updatedAt = now,
+            passwordChangedAt = now,
+            contentChangedAt = now
+        )
+
+        print("Writing... ")
+        System.out.flush()
+        try {
+            client.createCredential(vault.encrypt(credential, vaultKey))
+        } catch (e: Exception) {
+            println()
+            System.err.println("Not written: ${e.message}")
+            return
+        }
+
+        // Only after the write succeeds. Showing it in the list first would claim something
+        // that had not happened.
+        snapshot = snapshot.copy(
+            items = (snapshot.items + credential).sortedBy { it.displayName.lowercase() }
+        )
+        println("saved.")
+        println("The phone will pick it up on its next sync.")
+    }
+
     private fun line(index: Int, credential: Credential): String {
         val name = credential.displayName.padEnd(24)
         val user = credential.username.padEnd(24)
@@ -204,9 +291,20 @@ private class CloudBrowser(private val snapshot: VaultSnapshot<Credential>) {
         if (credential.notes.isNotEmpty()) println("  notes     ${credential.notes}")
         if (credential.category.isNotEmpty()) println("  category  ${credential.category}")
         if (credential.tags.isNotEmpty()) println("  tags      ${credential.tags.joinToString(", ")}")
-        val strength = evaluator(credential.password)
+        describe(credential.password, label = "strength")
+    }
+
+    private fun describe(password: String, label: String = "") {
+        val strength = evaluator(password)
         val common = if (strength.isCommon) " - this is a known-common password" else ""
-        println("  strength  ${strength.level} (${strength.entropy.toInt()} bits)$common")
+        val prefix = if (label.isEmpty()) "  " else "  ${label.padEnd(9)} "
+        println("$prefix${strength.level} (${strength.entropy.toInt()} bits)$common")
+    }
+
+    private fun prompt(label: String): String? {
+        print("$label: ")
+        System.out.flush()
+        return readlnOrNull()
     }
 }
 

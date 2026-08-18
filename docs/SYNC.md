@@ -103,8 +103,14 @@ It is what makes the wrapped vault key visibly load-bearing. Without `vaultKeyCi
 in `vaults/{uid}`, the desktop can verify the master password and still not reach a single
 credential; it refuses that case rather than showing an empty vault.
 
-The unbuilt flow above stays unbuilt. The desktop has no vault of its own, so it cannot
-poison an account — but it cannot help design the merge either, because it never pushes.
+The desktop can now also **create** an entry, and only create. A fresh UUID cannot collide
+with an existing row, so no merge decision is ever required; the write carries a
+create-only precondition the server enforces, and sets `serverUpdatedAt` from the server
+clock in the same operation so the phone's ordered pull can see it.
+
+The unbuilt flow above stays unbuilt, and editing and deleting from the desktop stay
+unbuilt with it. Those are the operations that would put two real writers against one row
+for the first time.
 
 Confirmed against the owner's live vault: sign-in, config fetch, unlock and decryption of
 every row. It required the #64 fix first — before that the cloud config carried no wrapped

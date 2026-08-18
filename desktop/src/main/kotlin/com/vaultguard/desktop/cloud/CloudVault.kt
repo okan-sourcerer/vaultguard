@@ -136,4 +136,31 @@ class CloudVault {
             undecryptableIds = failed
         )
     }
+
+    /**
+     * Seals a credential under the vault key, ready to be written.
+     *
+     * A fresh IV per encryption, as everywhere else — the frozen AES-256-GCM arrangement in
+     * `docs/SECURITY.md`. Reusing an IV under one key is the failure that breaks GCM
+     * outright, and nothing about a new row makes it acceptable here.
+     *
+     * The three row clocks all take the same instant on a new entry: it was created,
+     * written and given its password at once. `contentChangedAt` travels inside the
+     * payload, so [CredentialPayloadCodec] carries it (#58).
+     */
+    fun encrypt(credential: Credential, vaultKey: SecretKey): RemoteCredentialRow {
+        val plaintext = CredentialPayloadCodec.encode(credential).toByteArray(Charsets.UTF_8)
+        val sealed = cryptoManager.encrypt(plaintext, vaultKey)
+        plaintext.fill(0)
+
+        return RemoteCredentialRow(
+            id = credential.id,
+            encryptedPayload = sealed.ciphertext,
+            iv = sealed.iv,
+            createdAt = credential.createdAt,
+            updatedAt = credential.updatedAt,
+            passwordChangedAt = credential.passwordChangedAt,
+            isDeleted = false
+        )
+    }
 }

@@ -40,7 +40,7 @@ What it deliberately does **not** have, and what a fuller client would need to a
 
 | Missing | Why it is not a gap yet |
 | --- | --- |
-| Any write to Firestore | Cloud mode reads only. Push comes after the read path has been exercised against the live vault. |
+| Editing or deleting a cloud entry | Creating under a fresh UUID cannot collide, so it never reaches `SyncMerge`'s conflict rules — which are well tested and have never run against two real writers. Edit and delete are the operations that would. |
 | A key at rest | Nothing is persisted. The password is derived per operation and the array is consumed by `KeyDerivation`, so no key outlives the call. |
 | SQLCipher's layer | There is no local database. The only thing on disk is the backup, which is already encrypted end to end. |
 | Clipboard handling | `show` prints to stdout. None of the Android clipboard-clearing machinery (#31, #46) applies or exists here. |
@@ -65,6 +65,13 @@ the client stores nothing and pays one Argon2id derivation per run.
 
 Rows that fail to decrypt are reported before anything is listed, never dropped — the
 `VaultSnapshot` contract from #40 applies here exactly as it does on the phone.
+
+Writing is one operation wide: create a credential. It goes through Firestore's `:commit`
+endpoint rather than a plain `PATCH`, because only a commit carries an `updateTransforms`,
+and `serverUpdatedAt` is not optional — the phone pulls with an `orderBy` on that field and
+Firestore omits documents lacking an ordered field, so a row written without it would be
+invisible to the phone for ever while looking correct in the console. The same write
+carries `currentDocument.exists = false`, so it can add a row and can never replace one.
 
 A backup exported from the owner's device has been opened with this CLI — key derived,
 vault unlocked, credentials shown correctly. That is the check the fixture below cannot

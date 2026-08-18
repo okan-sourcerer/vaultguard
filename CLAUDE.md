@@ -12,7 +12,8 @@ optional Firestore sync). Three modules:
   client links the same classes rather than reimplementing them.
 - **`:app`** — everything Android: UI, Room, autofill, Keystore, Firebase.
 - **`:desktop`** — a JVM CLI with two modes: read/write over a v2 backup file, and
-  **read-only** over the Firestore vault the phone publishes. No Keystore, no local
+  browse-and-add over the Firestore vault the phone publishes. It cannot edit or delete a
+  cloud entry, so it never reaches the two-writer conflict rules. No Keystore, no local
   database, no persisted state of its own beyond an OAuth config file.
 
 `:core` and `:app` share the package namespace (`com.vaultguard.app.*`) because the split

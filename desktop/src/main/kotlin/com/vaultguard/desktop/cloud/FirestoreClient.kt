@@ -11,11 +11,12 @@ import java.net.http.HttpResponse
 class FirestoreException(message: String) : Exception(message)
 
 /**
- * The read half of the Firestore REST API, which is all this client needs.
+ * The parts of the Firestore REST API this client needs: reads, and creating a credential.
  *
- * There is deliberately no write path here yet. Reading proves the chain end to end — sign
- * in, fetch config, unwrap the vault key, decrypt — against a live vault without being able
- * to damage it. Push comes after that is known good.
+ * The write surface is deliberately one operation wide. Creating a row under a fresh UUID
+ * cannot collide with anything, so it never reaches the two-writer conflict rules in
+ * `SyncMerge` — which are well tested but have never run against two real writers. Editing
+ * and deleting are the operations that would, and they are not here.
  */
 class FirestoreClient(
     private val config: DesktopConfig,
@@ -73,6 +74,32 @@ class FirestoreClient(
         return documents
     }
 
+    /**
+     * Creates one credential document.
+     *
+     * Goes through `:commit` rather than a plain PATCH because only a commit can carry an
+     * `updateTransforms`, and the server timestamp is not optional — see
+     * [FirestoreWrites.SERVER_TIME_TRANSFORM]. The write also carries a create-only
+     * precondition, so this can add a row and can never replace one.
+     */
+    fun createCredential(row: RemoteCredentialRow) {
+        val name = "projects/${config.projectId}/databases/(default)/documents" +
+            "/vaults/${session.uid}/credentials/${row.id}"
+
+        val body = FirestoreWrites.commitBody(
+            listOf(FirestoreWrites.createCredentialWrite(name, row))
+        )
+
+        val request = HttpRequest.newBuilder(URI("$documentsRoot:commit"))
+            .header("Authorization", "Bearer ${session.idToken}")
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build()
+
+        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+        requireSuccess(response, "create the credential")
+    }
+
     private fun get(url: String): HttpResponse<String> {
         val request = HttpRequest.newBuilder(URI(url))
             .header("Authorization", "Bearer ${session.idToken}")
@@ -90,11 +117,20 @@ class FirestoreClient(
             ""
         }
 
-        val hint = when (response.statusCode()) {
-            401 -> " The session may have expired; sign in again."
-            403 -> " Firestore's security rules refused this read. Check that vaults/{uid} " +
-                "allows request.auth.uid == uid, and that you signed in with the same " +
-                "Google account as the phone."
+        val hint = when {
+            response.statusCode() == 401 -> " The session may have expired; sign in again."
+
+            response.statusCode() == 403 ->
+                " Firestore's security rules refused this. Check that vaults/{uid} allows " +
+                    "request.auth.uid == uid for the credentials subcollection as well as " +
+                    "the document, and that you signed in with the same Google account as " +
+                    "the phone."
+
+            // The create-only precondition. For a freshly generated UUID this should be
+            // unreachable, so it means something is wrong rather than something is racing.
+            detail.contains("already exists", ignoreCase = true) ->
+                " A document with that id already exists; nothing was overwritten."
+
             else -> ""
         }
 

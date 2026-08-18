@@ -223,4 +223,98 @@ class CloudVaultTest {
 
         assertTrue(snapshot.isGenuinelyEmpty)
     }
+
+    // -- Writing ------------------------------------------------------------------------
+
+    @Test
+    fun `an encrypted credential decrypts back to itself`() {
+        val published = publish()
+        val vaultKey = CloudVault().unlock(configOf(published), password.toCharArray())
+
+        val source = Credential(
+            id = "new-entry",
+            siteName = "Fastmail",
+            appName = "Fastmail",
+            url = "https://fastmail.com",
+            username = "okan",
+            password = "generated-p@ssw0rd",
+            notes = "line one\nline two\ttabbed",
+            category = "Email",
+            tags = listOf("personal"),
+            isPinned = false,
+            createdAt = 1_760_000_000_000L,
+            updatedAt = 1_760_000_000_000L,
+            passwordChangedAt = 1_760_000_000_000L,
+            contentChangedAt = 1_760_000_000_000L
+        )
+
+        val row = CloudVault().encrypt(source, vaultKey)
+        val restored = CloudVault().decrypt(listOf(row), vaultKey).items.single()
+
+        assertEquals(source, restored)
+    }
+
+    @Test
+    fun `a new row is never a tombstone`() {
+        val published = publish()
+        val vaultKey = CloudVault().unlock(configOf(published), password.toCharArray())
+
+        val row = CloudVault().encrypt(credential("x", "y").copy(id = "n"), vaultKey)
+
+        assertFalse(row.isDeleted)
+    }
+
+    @Test
+    fun `each encryption draws a fresh iv`() {
+        val published = publish()
+        val vaultKey = CloudVault().unlock(configOf(published), password.toCharArray())
+        val source = credential("github", "hunter2").copy(id = "same-id")
+
+        val first = CloudVault().encrypt(source, vaultKey)
+        val second = CloudVault().encrypt(source, vaultKey)
+
+        // Reusing an IV under one key is the failure that breaks GCM outright. Identical
+        // input must not produce identical output.
+        assertFalse("an IV was reused", first.iv.contentEquals(second.iv))
+        assertFalse(first.encryptedPayload.contentEquals(second.encryptedPayload))
+    }
+
+    @Test
+    fun `the row carries the credential's own clocks`() {
+        val published = publish()
+        val vaultKey = CloudVault().unlock(configOf(published), password.toCharArray())
+        val source = credential("x", "y").copy(
+            id = "n",
+            createdAt = 111L,
+            updatedAt = 222L,
+            passwordChangedAt = 333L
+        )
+
+        val row = CloudVault().encrypt(source, vaultKey)
+
+        assertEquals(111L, row.createdAt)
+        assertEquals(222L, row.updatedAt)
+        assertEquals(333L, row.passwordChangedAt)
+    }
+
+    @Test
+    fun `a written row survives the full wire round-trip`() {
+        // encrypt -> Firestore fields -> document -> decode -> decrypt. Every layer this
+        // client owns, in one pass.
+        val published = publish()
+        val vaultKey = CloudVault().unlock(configOf(published), password.toCharArray())
+        val source = credential("github", "hunter2").copy(id = "wire-1")
+
+        val row = CloudVault().encrypt(source, vaultKey)
+        val document = org.json.JSONObject()
+            .put("name", "projects/p/databases/(default)/documents/vaults/uid/credentials/wire-1")
+            .put("fields", FirestoreWrites.credentialFields(row))
+
+        val decoded = RemoteVaultCodec.readCredentialRow(document)!!
+        val restored = CloudVault().decrypt(listOf(decoded), vaultKey).items.single()
+
+        assertEquals("wire-1", restored.id)
+        assertEquals("hunter2", restored.password)
+        assertEquals("github", restored.siteName)
+    }
 }
