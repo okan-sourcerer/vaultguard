@@ -116,6 +116,16 @@ class CloudVault {
     }
 
     /**
+     * Drops the session key.
+     *
+     * Delegates to [MasterPasswordManager.lockVault], which is where the key actually
+     * lives, rather than keeping a second copy here that would have to be forgotten too.
+     */
+    fun lock() {
+        masterPasswordManager.lockVault()
+    }
+
+    /**
      * Decrypts what was fetched, carrying the failures rather than dropping them.
      *
      * Tombstoned rows are filtered out before decryption — they are deletions the phone has

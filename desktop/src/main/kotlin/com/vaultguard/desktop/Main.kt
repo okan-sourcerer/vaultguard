@@ -7,6 +7,7 @@ import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.desktop.cloud.DesktopConfig
 import com.vaultguard.desktop.cloud.SavedSession
+import com.vaultguard.desktop.service.runTrayService
 import java.io.File
 import java.util.UUID
 
@@ -18,6 +19,7 @@ vaultguard <backup-file>    open a format-v2 backup file
 vaultguard --cloud          open the Firestore vault your phone publishes
 vaultguard --cloud-setup    write a configuration template for --cloud
 vaultguard --cloud-signout  forget the saved sign-in
+vaultguard --service        run in the system tray
 
 File mode opens a backup, or starts a new vault if the file does not exist yet.
 Generate passwords, add entries, and write the file back out. Nothing reaches the
@@ -27,6 +29,10 @@ Cloud mode signs in with Google once and remembers it, so later runs need only
 your master password. It browses, adds, edits and soft-deletes. Every write is
 checked against the version it fetched, so if your phone changed an entry since,
 the write is refused rather than overwriting it.
+
+Service mode puts a tray icon in the notification area: unlock, refresh, lock,
+sign out, quit. It holds the vault open so other things can use it, and locks
+itself after 15 minutes unused.
 
 Neither mode keeps a copy of your password. Both derive per operation and let
 KeyDerivation zero the array. The remembered sign-in is sealed under your master
@@ -43,6 +49,7 @@ fun main(args: Array<String>) {
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
         "--cloud-signout" -> cloudSignOut()
+        "--service" -> runTrayService()
         else -> {
             val file = File(args[0])
             val vault = openOrCreate(file) ?: return

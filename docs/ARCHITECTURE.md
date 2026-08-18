@@ -105,6 +105,44 @@ Tombstones are what make a deletion propagate: the phone soft-deletes and pushes
 `isDeleted: true`, and `CloudVault.decrypt` filters those rows out. So a `refresh` after a
 phone-side delete drops the entry, and no separate delete path is needed on this side.
 
+### The tray service
+
+`--service` runs resident: a tray icon whose menu unlocks, refreshes, locks, signs out and
+quits. It exists because the browser extension needs something to talk to, and building it
+first forces the question the CLI could dodge — a session the user sits in front of and
+closes is not the same as a process that stays running.
+
+So auto-lock is answered here rather than deferred. Fifteen minutes idle, where **idle means
+since the vault was last used**, not since the user last touched a keyboard: a background
+service has no interaction to measure, and the meaningful question is how long a key has sat
+in memory unread. Every read goes through `VaultService.credentials()`, which resets the
+timer — otherwise a consumer serving credentials steadily would still be locked out from
+under itself.
+
+The timer runs on a **monotonic** clock. Wall-clock time jumps for daylight saving, NTP
+corrections and users, and this codebase has been bitten by clock comparisons before (#20).
+
+`VaultService` holds all the state and makes all the decisions; `TrayApp` only draws. That
+split is not tidiness — see below.
+
+### Where the tray will and will not appear
+
+`java.awt.SystemTray` speaks the XEmbed system-tray protocol.
+
+| Platform | Works |
+| --- | --- |
+| Windows | Yes |
+| macOS | Yes (menu bar) |
+| KDE, XFCE, Cinnamon, MATE | Yes |
+| GNOME | **No** — the protocol was removed in 3.26 |
+
+GNOME is the common Linux default, and its replacement (StatusNotifierItem, over DBus) is
+not something AWT speaks; the AppIndicator extension does not bridge to it either. Nothing
+in `VaultService` depends on any of this, so supporting those desktops is a replacement for
+`TrayApp` — a DBus implementation, or a library like dorkbox SystemTray — rather than a
+rewrite. `SystemTray.isSupported()` is checked at startup and says so plainly instead of
+starting an invisible process.
+
 ### Writing from the desktop
 
 Three operations: create, update, soft-delete. All go through Firestore's `:commit`
