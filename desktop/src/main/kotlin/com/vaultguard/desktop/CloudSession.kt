@@ -89,20 +89,9 @@ fun runCloudSession() {
     }
     println("unlocked.")
 
-    print("Fetching credentials... ")
-    System.out.flush()
-    val rows = try {
-        client.credentialDocuments().mapNotNull { RemoteVaultCodec.readCredentialRow(it) }
-    } catch (e: Exception) {
-        println()
-        System.err.println("${e.message}")
-        return
-    }
-    val snapshot = vault.decrypt(rows, vaultKey)
-    println("${rows.size} ${if (rows.size == 1) "row" else "rows"}.")
-
-    report(snapshot)
-    CloudBrowser(snapshot, vault, vaultKey, client).run()
+    val browser = CloudBrowser(vault, vaultKey, client)
+    if (!browser.refresh()) return
+    browser.run()
 }
 
 /**
@@ -131,17 +120,57 @@ private fun report(snapshot: VaultSnapshot<Credential>) {
 }
 
 private class CloudBrowser(
-    initial: VaultSnapshot<Credential>,
     private val vault: CloudVault,
     private val vaultKey: javax.crypto.SecretKey,
     private val client: FirestoreClient
 ) {
     /**
-     * Grows as entries are added, so `list` reflects what this session has written without
-     * a second round-trip. Only ever appended to: nothing here can remove or replace an
-     * entry, locally or remotely.
+     * What the vault looked like when it was last fetched.
+     *
+     * A snapshot, and named one for a reason: it does not track the cloud. An entry deleted
+     * on the phone stays listed here until [refresh] re-reads, and a password manager
+     * showing an entry that no longer exists is showing something untrue. `refresh` is the
+     * answer rather than polling, because every fetch is a decryption pass over the whole
+     * vault and the CLI is a foreground tool the user is already driving.
      */
-    private var snapshot = initial
+    private var snapshot: VaultSnapshot<Credential> = VaultSnapshot(emptyList())
+
+    private var hasFetched = false
+
+    /**
+     * Re-reads the vault from Firestore and decrypts it.
+     *
+     * @return false if the fetch failed, which at startup means there is nothing to browse.
+     */
+    fun refresh(): Boolean {
+        print("Fetching credentials... ")
+        System.out.flush()
+
+        val rows = try {
+            client.credentialDocuments().mapNotNull { RemoteVaultCodec.readCredentialRow(it) }
+        } catch (e: Exception) {
+            println()
+            System.err.println("${e.message}")
+            return false
+        }
+
+        val previous = snapshot.items.map { it.id }.toSet()
+        snapshot = vault.decrypt(rows, vaultKey)
+        println("${rows.size} ${if (rows.size == 1) "row" else "rows"}.")
+
+        // Only from the second fetch on: at startup there is no "before" to compare
+        // against, and an empty vault gaining entries is still a real delta worth showing.
+        if (hasFetched) {
+            val current = snapshot.items.map { it.id }.toSet()
+            val gone = previous.count { it !in current }
+            val fresh = current.count { it !in previous }
+            if (gone > 0 || fresh > 0) println("$fresh new, $gone no longer here.")
+        }
+        hasFetched = true
+
+        report(snapshot)
+        return true
+    }
 
     fun run() {
         println("Type `help` for commands. `add` writes; nothing else does.")
@@ -157,6 +186,7 @@ private class CloudBrowser(
                 "list", "ls" -> list()
                 "show" -> show(parts.getOrNull(1))
                 "find" -> find(parts.drop(1).joinToString(" "))
+                "refresh", "r" -> refresh()
                 "gen" -> gen(parts.getOrNull(1))
                 "add" -> add()
                 "quit", "exit", "q" -> return
@@ -170,12 +200,16 @@ private class CloudBrowser(
         list            list entries
         show <n>        show one entry in full, including its password
         find <text>     entries whose name, username or URL contains <text>
+        refresh         re-read the vault from the cloud
         gen [length]    generate a password without saving it
         add             create an entry and write it to the cloud vault
         quit            exit
 
         `add` is the only command that writes, and it can only create. Nothing here
         edits or deletes, in the cloud or anywhere else.
+
+        The list is a snapshot from when it was last fetched, not a live view. If the
+        phone has changed something since, `refresh`.
         """.trimIndent()
     )
 
@@ -263,7 +297,8 @@ private class CloudBrowser(
         }
 
         // Only after the write succeeds. Showing it in the list first would claim something
-        // that had not happened.
+        // that had not happened. This is a local append rather than a refetch: the server
+        // has it, and re-decrypting the whole vault to learn that would be wasteful.
         snapshot = snapshot.copy(
             items = (snapshot.items + credential).sortedBy { it.displayName.lowercase() }
         )

@@ -66,6 +66,17 @@ the client stores nothing and pays one Argon2id derivation per run.
 Rows that fail to decrypt are reported before anything is listed, never dropped — the
 `VaultSnapshot` contract from #40 applies here exactly as it does on the phone.
 
+The listing is a **snapshot**, not a live view. It is fetched once at unlock and again on
+`refresh`, and nothing subscribes to changes — so an entry deleted on the phone stays
+listed until the next fetch. That is the shape a CLI wants (every fetch is a decryption
+pass over the whole vault), but it has to be said out loud, because a password manager
+showing an entry that no longer exists is showing something untrue. `add` appends locally
+after the server confirms the write rather than refetching.
+
+Tombstones are what make a deletion propagate: the phone soft-deletes and pushes
+`isDeleted: true`, and `CloudVault.decrypt` filters those rows out. So a `refresh` after a
+phone-side delete drops the entry, and no separate delete path is needed on this side.
+
 Writing is one operation wide: create a credential. It goes through Firestore's `:commit`
 endpoint rather than a plain `PATCH`, because only a commit carries an `updateTransforms`,
 and `serverUpdatedAt` is not optional — the phone pulls with an `orderBy` on that field and
