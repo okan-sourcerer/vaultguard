@@ -63,15 +63,80 @@ object FirestoreWrites {
                     .put("name", documentName)
                     .put("fields", credentialFields(row))
             )
-            .put(
-                "updateTransforms",
-                JSONArray().put(
-                    JSONObject()
-                        .put("fieldPath", "serverUpdatedAt")
-                        .put("setToServerValue", SERVER_TIME_TRANSFORM)
-                )
-            )
+            .put("updateTransforms", serverTimeTransform())
             .put("currentDocument", JSONObject().put("exists", false))
+
+    /**
+     * Replaces a credential document, but only if nothing has touched it since it was read.
+     *
+     * `currentDocument.updateTime` is optimistic concurrency, enforced by the server. It is
+     * what makes editing from a second client safe at all: the desktop holds a snapshot,
+     * the phone may have written since, and without this precondition the edit would
+     * silently discard whatever arrived in between. With it, the commit fails and the user
+     * is told to refresh.
+     *
+     * The phone reaches the same outcome by a different route — `SyncMerge` writes the
+     * remote copy alongside the local one rather than choosing — because it is reconciling
+     * after the fact. This client is writing live and can simply refuse.
+     */
+    fun updateCredentialWrite(
+        documentName: String,
+        row: RemoteCredentialRow,
+        expectedUpdateTime: String
+    ): JSONObject = JSONObject()
+        .put(
+            "update",
+            JSONObject()
+                .put("name", documentName)
+                .put("fields", credentialFields(row))
+        )
+        .put("updateTransforms", serverTimeTransform())
+        .put("currentDocument", JSONObject().put("updateTime", expectedUpdateTime))
+
+    /**
+     * Flips a row to a tombstone, touching only the two fields that change.
+     *
+     * A soft delete, exactly as the phone does it: the ciphertext stays, so an undo on the
+     * phone still has something to restore and the 30-day tombstone purge remains the only
+     * thing that removes data.
+     *
+     * The `updateMask` is what keeps this to two fields. A commit without one replaces the
+     * whole document, which here would mean rewriting the payload from a decrypted copy for
+     * no reason — and getting that wrong would destroy the entry rather than hide it.
+     */
+    fun tombstoneWrite(
+        documentName: String,
+        updatedAt: Long,
+        expectedUpdateTime: String
+    ): JSONObject = JSONObject()
+        .put(
+            "update",
+            JSONObject()
+                .put("name", documentName)
+                .put(
+                    "fields",
+                    JSONObject()
+                        .put(RemoteVaultCodec.FIELD_IS_DELETED, booleanValue(true))
+                        .put(RemoteVaultCodec.FIELD_UPDATED_AT, integerValue(updatedAt))
+                )
+        )
+        .put(
+            "updateMask",
+            JSONObject().put(
+                "fieldPaths",
+                JSONArray()
+                    .put(RemoteVaultCodec.FIELD_IS_DELETED)
+                    .put(RemoteVaultCodec.FIELD_UPDATED_AT)
+            )
+        )
+        .put("updateTransforms", serverTimeTransform())
+        .put("currentDocument", JSONObject().put("updateTime", expectedUpdateTime))
+
+    private fun serverTimeTransform(): JSONArray = JSONArray().put(
+        JSONObject()
+            .put("fieldPath", "serverUpdatedAt")
+            .put("setToServerValue", SERVER_TIME_TRANSFORM)
+    )
 
     fun commitBody(writes: List<JSONObject>): JSONObject =
         JSONObject().put("writes", JSONArray(writes))

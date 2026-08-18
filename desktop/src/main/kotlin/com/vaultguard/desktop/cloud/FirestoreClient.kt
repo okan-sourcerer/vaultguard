@@ -11,6 +11,15 @@ import java.net.http.HttpResponse
 class FirestoreException(message: String) : Exception(message)
 
 /**
+ * The document changed between being read and being written.
+ *
+ * Its own type because it is not a failure so much as a race the user can resolve: refresh
+ * and look at what the other device did before deciding again.
+ */
+class StaleWriteException :
+    Exception("That entry changed on another device since it was last fetched. Nothing was written — `refresh` and try again.")
+
+/**
  * The parts of the Firestore REST API this client needs: reads, and creating a credential.
  *
  * The write surface is deliberately one operation wide. Creating a row under a fresh UUID
@@ -83,21 +92,52 @@ class FirestoreClient(
      * precondition, so this can add a row and can never replace one.
      */
     fun createCredential(row: RemoteCredentialRow) {
-        val name = "projects/${config.projectId}/databases/(default)/documents" +
-            "/vaults/${session.uid}/credentials/${row.id}"
-
-        val body = FirestoreWrites.commitBody(
-            listOf(FirestoreWrites.createCredentialWrite(name, row))
+        commit(
+            FirestoreWrites.createCredentialWrite(documentName(row.id), row),
+            "create the credential"
         )
+    }
 
+    /**
+     * Replaces a credential, but only if it still looks the way it did when read.
+     *
+     * @throws StaleWriteException if another device wrote to it in between.
+     */
+    fun updateCredential(row: RemoteCredentialRow) {
+        val expected = requireNotNull(row.updateTime) {
+            "This row was not read from Firestore, so there is nothing to check it against."
+        }
+        commit(
+            FirestoreWrites.updateCredentialWrite(documentName(row.id), row, expected),
+            "update the credential"
+        )
+    }
+
+    /**
+     * Soft-deletes a credential, the same way the phone does: a tombstone, not a removal.
+     * The ciphertext stays until the 30-day purge, so this is undoable from the phone.
+     */
+    fun tombstoneCredential(row: RemoteCredentialRow, updatedAt: Long) {
+        val expected = requireNotNull(row.updateTime) {
+            "This row was not read from Firestore, so there is nothing to check it against."
+        }
+        commit(
+            FirestoreWrites.tombstoneWrite(documentName(row.id), updatedAt, expected),
+            "delete the credential"
+        )
+    }
+
+    private fun documentName(id: String): String =
+        "projects/${config.projectId}/databases/(default)/documents/vaults/${session.uid}/credentials/$id"
+
+    private fun commit(write: JSONObject, what: String) {
         val request = HttpRequest.newBuilder(URI("$documentsRoot:commit"))
             .header("Authorization", "Bearer ${session.idToken}")
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .POST(HttpRequest.BodyPublishers.ofString(FirestoreWrites.commitBody(listOf(write)).toString()))
             .build()
 
-        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
-        requireSuccess(response, "create the credential")
+        requireSuccess(http.send(request, HttpResponse.BodyHandlers.ofString()), what)
     }
 
     private fun get(url: String): HttpResponse<String> {
@@ -115,6 +155,15 @@ class FirestoreClient(
             JSONObject(response.body()).optJSONObject("error")?.optString("message").orEmpty()
         } catch (e: Exception) {
             ""
+        }
+
+        // The updateTime precondition losing. Not a fault to report as one: the other
+        // device won the race, nothing was overwritten, and the user needs to look rather
+        // than retry.
+        if (detail.contains("does not match the required base version", ignoreCase = true) ||
+            detail.contains("FAILED_PRECONDITION", ignoreCase = true)
+        ) {
+            throw StaleWriteException()
         }
 
         val hint = when {

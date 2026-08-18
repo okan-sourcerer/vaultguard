@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -96,5 +97,94 @@ class FirestoreWritesTest {
         val name = write.getJSONObject("update").getString("name")
 
         assertEquals(row.id, FirestoreDocuments.documentId(name))
+    }
+
+    // -- Updating and deleting -----------------------------------------------------------
+
+    private val readAt = "2026-08-18T10:11:12.131415Z"
+
+    @Test
+    fun `an update is conditional on the version that was read`() {
+        val write = FirestoreWrites.updateCredentialWrite(documentName, row, readAt)
+
+        // Without this the desktop would overwrite whatever the phone wrote since the
+        // listing was fetched, and the loser would never know.
+        assertEquals(readAt, write.getJSONObject("currentDocument").getString("updateTime"))
+    }
+
+    @Test
+    fun `an update does not carry the create-only precondition`() {
+        val write = FirestoreWrites.updateCredentialWrite(documentName, row, readAt)
+        assertFalse(write.getJSONObject("currentDocument").has("exists"))
+    }
+
+    @Test
+    fun `an update rewrites the whole document`() {
+        // No updateMask: an edit changes the ciphertext, the IV and the clocks together,
+        // and a partial write would leave a payload that no longer matches its IV.
+        val write = FirestoreWrites.updateCredentialWrite(documentName, row, readAt)
+        assertFalse(write.has("updateMask"))
+        assertTrue(write.getJSONObject("update").getJSONObject("fields").has("encryptedPayload"))
+    }
+
+    @Test
+    fun `a delete touches only the tombstone fields`() {
+        val write = FirestoreWrites.tombstoneWrite(documentName, 1_760_000_000_000L, readAt)
+        val paths = write.getJSONObject("updateMask").getJSONArray("fieldPaths")
+        val listed = (0 until paths.length()).map { paths.getString(it) }.toSet()
+
+        assertEquals(setOf("isDeleted", "updatedAt"), listed)
+    }
+
+    @Test
+    fun `a delete leaves the ciphertext alone`() {
+        val write = FirestoreWrites.tombstoneWrite(documentName, 1_760_000_000_000L, readAt)
+        val fields = write.getJSONObject("update").getJSONObject("fields")
+
+        // A soft delete, as on the phone. The payload has to survive or an undo there has
+        // nothing to restore, and the 30-day purge stops being the only thing that removes
+        // data.
+        assertFalse(fields.has("encryptedPayload"))
+        assertFalse(fields.has("iv"))
+        assertTrue(fields.getJSONObject("isDeleted").getBoolean("booleanValue"))
+    }
+
+    @Test
+    fun `a delete is conditional on the version that was read`() {
+        val write = FirestoreWrites.tombstoneWrite(documentName, 1L, readAt)
+        assertEquals(readAt, write.getJSONObject("currentDocument").getString("updateTime"))
+    }
+
+    @Test
+    fun `every write sets the server timestamp`() {
+        val writes = listOf(
+            FirestoreWrites.createCredentialWrite(documentName, row),
+            FirestoreWrites.updateCredentialWrite(documentName, row, readAt),
+            FirestoreWrites.tombstoneWrite(documentName, 1L, readAt)
+        )
+
+        // A row the phone cannot see is a row that does not exist to it: its pull orders by
+        // this field and Firestore omits documents that lack an ordered field. A delete
+        // that never reaches the phone is the worst of the three.
+        for (write in writes) {
+            val transform = write.getJSONArray("updateTransforms").getJSONObject(0)
+            assertEquals("serverUpdatedAt", transform.getString("fieldPath"))
+            assertEquals("REQUEST_TIME", transform.getString("setToServerValue"))
+        }
+    }
+
+    @Test
+    fun `a read row carries the update time it was read at`() {
+        val document = JSONObject()
+            .put("name", documentName)
+            .put("updateTime", readAt)
+            .put("fields", FirestoreWrites.credentialFields(row))
+
+        assertEquals(readAt, RemoteVaultCodec.readCredentialRow(document)!!.updateTime)
+    }
+
+    @Test
+    fun `a row built rather than read has no update time`() {
+        assertNull(row.updateTime)
     }
 }

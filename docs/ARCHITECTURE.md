@@ -40,7 +40,7 @@ What it deliberately does **not** have, and what a fuller client would need to a
 
 | Missing | Why it is not a gap yet |
 | --- | --- |
-| Editing or deleting a cloud entry | Creating under a fresh UUID cannot collide, so it never reaches `SyncMerge`'s conflict rules — which are well tested and have never run against two real writers. Edit and delete are the operations that would. |
+| A merge decision of its own | Writes are conditional on the version that was read, so a race is refused rather than reconciled. Only the phone merges. |
 | A key at rest | Nothing is persisted. The password is derived per operation and the array is consumed by `KeyDerivation`, so no key outlives the call. |
 | SQLCipher's layer | There is no local database. The only thing on disk is the backup, which is already encrypted end to end. |
 | Clipboard handling | `show` prints to stdout. None of the Android clipboard-clearing machinery (#31, #46) applies or exists here. |
@@ -77,12 +77,39 @@ Tombstones are what make a deletion propagate: the phone soft-deletes and pushes
 `isDeleted: true`, and `CloudVault.decrypt` filters those rows out. So a `refresh` after a
 phone-side delete drops the entry, and no separate delete path is needed on this side.
 
-Writing is one operation wide: create a credential. It goes through Firestore's `:commit`
-endpoint rather than a plain `PATCH`, because only a commit carries an `updateTransforms`,
-and `serverUpdatedAt` is not optional — the phone pulls with an `orderBy` on that field and
-Firestore omits documents lacking an ordered field, so a row written without it would be
-invisible to the phone for ever while looking correct in the console. The same write
-carries `currentDocument.exists = false`, so it can add a row and can never replace one.
+### Writing from the desktop
+
+Three operations: create, update, soft-delete. All go through Firestore's `:commit`
+endpoint rather than a plain `PATCH`, because only a commit carries an `updateTransforms`
+and `serverUpdatedAt` is not optional (see below).
+
+Each carries a **precondition the server enforces**, and they differ:
+
+| Operation | Precondition | Why |
+| --- | --- | --- |
+| create | `exists = false` | A fresh UUID should never collide. If it does, something is wrong and stopping is the only safe answer. |
+| update | `updateTime` == the value read | The desktop holds a snapshot. Without this, an edit would silently discard whatever the phone wrote since the listing was fetched. |
+| delete | `updateTime` == the value read | Same race, same answer. |
+
+That precondition is why this client never needs merge logic. `SyncMerge` reconciles *after
+the fact*, because the phone discovers conflicts when it pulls; the desktop is writing live
+against a known version, so it can simply refuse and tell the user to refresh. Only one
+side of the system makes merge decisions, which is the point.
+
+An update rewrites the whole document — the ciphertext, the IV and the clocks move together
+and a partial write would leave a payload that no longer matches its IV. A delete uses an
+`updateMask` limited to `isDeleted` and `updatedAt`, so the ciphertext survives: it is a
+tombstone exactly as the phone writes one, still undoable there, and the 30-day purge
+remains the only thing that removes data.
+
+`passwordChangedAt` moves only when the password itself moves. Bumping it on every edit
+would make the phone's rotation prompt useless, which is what #29 separated the two clocks
+for.
+
+`serverUpdatedAt` is not optional on any of them: the phone pulls with an `orderBy` on that
+field, and Firestore omits documents lacking an ordered field from query results, so a row
+written without it would be invisible to the phone for ever while looking perfectly correct
+in the console. A delete that never reaches the phone is the worst version of that.
 
 A backup exported from the owner's device has been opened with this CLI — key derived,
 vault unlocked, credentials shown correctly. That is the check the fixture below cannot

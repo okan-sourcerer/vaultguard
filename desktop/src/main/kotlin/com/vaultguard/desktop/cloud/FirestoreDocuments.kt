@@ -82,7 +82,19 @@ data class RemoteCredentialRow(
     val createdAt: Long,
     val updatedAt: Long,
     val passwordChangedAt: Long,
-    val isDeleted: Boolean
+    val isDeleted: Boolean,
+    /**
+     * Firestore's own `updateTime` for the document, as read.
+     *
+     * This is what makes an edit from here safe. Sent back as a write precondition, it
+     * turns "overwrite whatever is there" into "overwrite only if nothing has touched it
+     * since I read it" — so a desktop edit against a stale listing fails loudly instead of
+     * silently discarding whatever the phone wrote in the meantime.
+     *
+     * Null for a row this client built rather than read; such a row cannot be used to
+     * update anything.
+     */
+    val updateTime: String? = null
 ) {
     override fun equals(other: Any?) = this === other || (other is RemoteCredentialRow && id == other.id)
     override fun hashCode() = id.hashCode()
@@ -141,7 +153,8 @@ object RemoteVaultCodec {
             updatedAt = updatedAt,
             // Same fallback the schema migration and the backup reader use.
             passwordChangedAt = FirestoreDocuments.long(fields, FIELD_PASSWORD_CHANGED_AT, updatedAt),
-            isDeleted = FirestoreDocuments.boolean(fields, FIELD_IS_DELETED)
+            isDeleted = FirestoreDocuments.boolean(fields, FIELD_IS_DELETED),
+            updateTime = document.optString("updateTime").takeIf { it.isNotEmpty() }
         )
     }
 }

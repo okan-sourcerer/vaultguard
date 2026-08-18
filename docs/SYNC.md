@@ -103,14 +103,22 @@ It is what makes the wrapped vault key visibly load-bearing. Without `vaultKeyCi
 in `vaults/{uid}`, the desktop can verify the master password and still not reach a single
 credential; it refuses that case rather than showing an empty vault.
 
-The desktop can now also **create** an entry, and only create. A fresh UUID cannot collide
-with an existing row, so no merge decision is ever required; the write carries a
-create-only precondition the server enforces, and sets `serverUpdatedAt` from the server
-clock in the same operation so the phone's ordered pull can see it.
+The desktop can also create, edit and soft-delete an entry. It still makes no merge
+decision, and that is deliberate: every write is conditional on the document version that
+was read, so a race is **refused** rather than reconciled. The user refreshes and looks at
+what the other device did.
 
-The unbuilt flow above stays unbuilt, and editing and deleting from the desktop stay
-unbuilt with it. Those are the operations that would put two real writers against one row
-for the first time.
+That keeps the two clients asymmetric on purpose. The phone reconciles after the fact,
+because it discovers conflicts when it pulls and cannot ask anyone; the desktop writes live
+against a known version and can. `SyncMerge`'s conflict rules therefore still have exactly
+one caller.
+
+A desktop delete writes the same tombstone the phone writes — `isDeleted` and `updatedAt`
+only, ciphertext untouched — so it is undoable on the phone and the 30-day purge remains
+the only thing that removes data.
+
+The unbuilt flow above stays unbuilt: joining an account that already holds a different
+vault is still refused with instructions.
 
 Confirmed against the owner's live vault: sign-in, config fetch, unlock and decryption of
 every row. It required the #64 fix first — before that the cloud config carried no wrapped
