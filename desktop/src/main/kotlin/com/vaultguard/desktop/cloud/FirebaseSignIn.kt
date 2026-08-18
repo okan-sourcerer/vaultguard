@@ -17,7 +17,19 @@ class SignInFailedException(message: String) : Exception(message)
  * uses lands on the same `vaults/{uid}` document. A different account is not a
  * misconfiguration to work around — it is a different vault.
  */
-data class FirebaseSession(val idToken: String, val uid: String, val email: String?)
+data class FirebaseSession(
+    val idToken: String,
+    val uid: String,
+    val email: String?,
+    /**
+     * Long-lived, and the reason signing in is a one-time event rather than a per-launch
+     * browser round-trip. The `idToken` beside it expires after an hour; this exchanges for
+     * a fresh one without any user interaction.
+     *
+     * Never written to disk in the clear — see [SavedSession].
+     */
+    val refreshToken: String? = null
+)
 
 /**
  * Exchanges a Google id_token for a Firebase session over the Identity Toolkit REST API.
@@ -66,7 +78,8 @@ class FirebaseSignIn(
         return FirebaseSession(
             idToken = idToken,
             uid = uid,
-            email = body.optString("email").ifEmpty { identity.email }
+            email = body.optString("email").ifEmpty { identity.email },
+            refreshToken = body.optString("refreshToken").takeIf { it.isNotEmpty() }
         )
     }
 

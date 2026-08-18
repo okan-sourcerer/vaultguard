@@ -61,7 +61,35 @@ as a precondition.
 
 `SecurePrefs` on this side is in-memory and dies with the process. There is no Keystore to
 protect a stored salt or wrapped key with, so rather than inventing a weaker at-rest story
-the client stores nothing and pays one Argon2id derivation per run.
+no vault material is written at all.
+
+### Staying signed in
+
+One thing does survive a run: the Firebase **refresh token**, sealed under the master key in
+`~/.vaultguard/desktop-session.json`. Without it every launch meant a full browser sign-in,
+and — worse — a Firebase `idToken` expires after an hour, so a long session started failing
+writes with a 401.
+
+The ordering is what makes this work with a single derivation. The token is what reaches
+Firestore, and Firestore is what supplies the salt, so the salt cannot come from the vault
+document on this path — it is stored beside the token, in the clear. That is safe: the salt
+is not secret, and the same value sits in the vault document and in the phone's preferences.
+So a launch derives once, and that key both opens the saved token and unwraps the vault key.
+
+Storing it in the clear the way `gcloud`, `gh` and `aws` do would have been a poor trade
+here, because the master password has to be typed anyway to open the vault — sealing the
+token under the key it derives costs the user nothing.
+
+What it exposes, stated plainly: the file is inert without the master password and decrypts
+nothing, but it is a **new offline-attackable artifact on the local disk** where the client
+previously persisted none. Master passwords can be tried against it at Argon2id cost per
+guess, exactly as against the verification blob in Firestore. Same class of exposure, same
+mitigation. `--cloud-signout` removes it.
+
+Two ways the saved session goes stale, both handled by falling back to a full sign-in rather
+than failing: the refresh token is revoked or expires, and the master password changes on
+the phone — which re-salts the vault, so the stored salt no longer matches and the key
+derived from it is discarded rather than tried.
 
 Rows that fail to decrypt are reported before anything is listed, never dropped — the
 `VaultSnapshot` contract from #40 applies here exactly as it does on the phone.

@@ -6,6 +6,7 @@ import com.vaultguard.app.domain.usecase.GeneratePasswordUseCase
 import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.desktop.cloud.DesktopConfig
+import com.vaultguard.desktop.cloud.SavedSession
 import java.io.File
 import java.util.UUID
 
@@ -16,17 +17,20 @@ private val USAGE = """
 vaultguard <backup-file>    open a format-v2 backup file
 vaultguard --cloud          open the Firestore vault your phone publishes
 vaultguard --cloud-setup    write a configuration template for --cloud
+vaultguard --cloud-signout  forget the saved sign-in
 
 File mode opens a backup, or starts a new vault if the file does not exist yet.
 Generate passwords, add entries, and write the file back out. Nothing reaches the
 file until you type `save`.
 
-Cloud mode signs in with Google, fetches the vault, and unlocks it with your
-master password. It can browse and it can add. It cannot edit or delete anything,
-so it never has to decide which of two versions of an entry wins.
+Cloud mode signs in with Google once and remembers it, so later runs need only
+your master password. It browses, adds, edits and soft-deletes. Every write is
+checked against the version it fetched, so if your phone changed an entry since,
+the write is refused rather than overwriting it.
 
 Neither mode keeps a copy of your password. Both derive per operation and let
-KeyDerivation zero the array.
+KeyDerivation zero the array. The remembered sign-in is sealed under your master
+key, so the file is inert without it.
 """.trim()
 
 fun main(args: Array<String>) {
@@ -38,6 +42,7 @@ fun main(args: Array<String>) {
     when (args[0]) {
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
+        "--cloud-signout" -> cloudSignOut()
         else -> {
             val file = File(args[0])
             val vault = openOrCreate(file) ?: return
@@ -56,6 +61,19 @@ private fun cloudSetup() {
     }
     println()
     println(DesktopConfig.template)
+}
+
+private fun cloudSignOut() {
+    val path = SavedSession.defaultPath
+    if (SavedSession.clear(path)) {
+        println("Forgot the saved sign-in at ${path.path}.")
+        println("The next `--cloud` will ask you to sign in with Google again.")
+    } else {
+        println("There was no saved sign-in at ${path.path}.")
+    }
+    println()
+    println("This does not revoke anything at Google. To do that, remove this app's access")
+    println("at https://myaccount.google.com/permissions")
 }
 
 private fun openOrCreate(file: File): BackupVault? {

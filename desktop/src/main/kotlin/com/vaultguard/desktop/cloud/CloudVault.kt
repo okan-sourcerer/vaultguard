@@ -20,13 +20,16 @@ class UnreachableVaultKeyException(message: String) : Exception(message)
 /**
  * [SecurePrefs] that keeps everything in memory and is dropped with the process.
  *
- * The desktop client persists nothing. It has no Keystore to protect a stored salt or a
- * wrapped key with, so rather than inventing a weaker at-rest story it stores none: the
- * configuration is fetched from Firestore each run, the master key exists for the length
- * of an unlock, and the vault key lives only in this process.
+ * No vault material is persisted. There is no Keystore here to protect a stored salt or a
+ * wrapped key with, so rather than inventing a weaker at-rest story none is written: the
+ * configuration is fetched from Firestore each run, the master key exists for the length of
+ * an unlock, and the vault key lives only in this process.
  *
- * The consequence worth stating plainly: closing the CLI discards everything, and every
- * run costs one Argon2id derivation.
+ * The one thing that does survive a run is the Firebase refresh token, and it is sealed
+ * under the master key — see [SavedSession]. It reaches Firestore; it opens nothing.
+ *
+ * The consequence worth stating plainly: every run costs one Argon2id derivation, and
+ * closing the CLI discards every key.
  */
 private class EphemeralPrefs : SecurePrefs {
     private val values = mutableMapOf<String, String>()
@@ -65,7 +68,24 @@ class CloudVault {
      *
      * @return the vault key — the `sessionKey` everything above the security layer uses.
      */
-    fun unlock(config: RemoteVaultConfig, password: CharArray): SecretKey {
+    fun unlock(config: RemoteVaultConfig, password: CharArray): SecretKey =
+        unlockWith(config, deriveMasterKey(config.salt, password))
+
+    /**
+     * Derives the master key against a salt, and nothing else.
+     *
+     * Separate from [unlockWith] because a saved session has to be opened *before* the
+     * vault document can be fetched: the refresh token is what reaches Firestore, and it is
+     * sealed under this key. Splitting the two means one Argon2id run serves both, rather
+     * than paying 64 MiB twice per launch.
+     *
+     * Consumes [password].
+     */
+    fun deriveMasterKey(salt: ByteArray, password: CharArray): SecretKey =
+        runBlocking { masterPasswordManager.deriveKey(password, salt) }
+
+    /** Verifies [masterKey] against the remote configuration and unwraps the vault key. */
+    fun unlockWith(config: RemoteVaultConfig, masterKey: SecretKey): SecretKey {
         if (!config.hasWrappedVaultKey) {
             throw UnreachableVaultKeyException(
                 "This cloud vault predates the wrapped vault key, so its rows cannot be " +
@@ -79,9 +99,6 @@ class CloudVault {
             verificationIv = config.verificationIv,
             wrappedVaultKey = EncryptedData(config.vaultKeyCiphertext!!, config.vaultKeyIv!!)
         )
-
-        val masterKey = runBlocking { masterPasswordManager.deriveMasterKey(password) }
-            ?: throw UnreachableVaultKeyException("The remote vault has no salt to derive against.")
 
         if (!masterPasswordManager.verifyMasterKey(masterKey)) throw WrongMasterPasswordException()
 

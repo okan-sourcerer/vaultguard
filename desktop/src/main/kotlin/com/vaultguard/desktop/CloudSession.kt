@@ -10,7 +10,12 @@ import com.vaultguard.desktop.cloud.DesktopConfig
 import com.vaultguard.desktop.cloud.FirebaseSignIn
 import com.vaultguard.desktop.cloud.FirestoreClient
 import com.vaultguard.desktop.cloud.GoogleOAuth
+import com.vaultguard.desktop.cloud.FirebaseSession
+import com.vaultguard.desktop.cloud.RefreshRejectedException
 import com.vaultguard.desktop.cloud.RemoteVaultCodec
+import com.vaultguard.desktop.cloud.SavedSession
+import com.vaultguard.desktop.cloud.TokenRefresh
+import javax.crypto.SecretKey
 import java.util.UUID
 
 private val evaluator = PasswordStrengthEvaluator()
@@ -31,18 +36,52 @@ fun runCloudSession() {
         return
     }
 
-    val identity = try {
-        GoogleOAuth(config).signIn { println(it) }
-    } catch (e: Exception) {
-        System.err.println("Sign-in failed: ${e.message}")
-        return
+    val vault = CloudVault()
+
+    // A saved session is opened before anything reaches the network, because the token that
+    // reaches the network is sealed under the master key. One Argon2id run serves both that
+    // and the vault unlock below.
+    var masterKey: SecretKey? = null
+    var derivedAgainst: ByteArray? = null
+    var session: FirebaseSession? = null
+
+    val savedSalt = SavedSession.saltOf()
+    if (savedSalt != null) {
+        val password = readMasterPassword("Master password: ") ?: run {
+            System.err.println("No password given.")
+            return
+        }
+        print("Deriving key (Argon2id, 64 MiB)... ")
+        System.out.flush()
+        val key = vault.deriveMasterKey(savedSalt, password)
+        println("done.")
+
+        val saved = SavedSession.open(key)
+        when {
+            saved == null -> {
+                // Either the wrong password, or a file left from a previous one. Both are
+                // fixed by signing in again, so neither is worth failing on.
+                println("The saved sign-in did not open with that password.")
+            }
+
+            else -> try {
+                session = TokenRefresh(config).exchange(saved.refreshToken, saved.email)
+                masterKey = key
+                derivedAgainst = savedSalt
+            } catch (e: RefreshRejectedException) {
+                println("${e.message} Signing in again.")
+                SavedSession.clear()
+            }
+        }
     }
 
-    val session = try {
-        FirebaseSignIn(config).exchange(identity)
-    } catch (e: Exception) {
-        System.err.println("${e.message}")
-        return
+    if (session == null) {
+        session = try {
+            FirebaseSignIn(config).exchange(GoogleOAuth(config).signIn { println(it) })
+        } catch (e: Exception) {
+            System.err.println("Sign-in failed: ${e.message}")
+            return
+        }
     }
     println("Signed in as ${session.email ?: session.uid}.")
 
@@ -70,24 +109,43 @@ fun runCloudSession() {
         return
     }
 
-    val password = readMasterPassword("Master password: ")
-    if (password == null) {
-        System.err.println("No password given.")
-        return
+    // The saved salt can be stale: changing the master password on the phone re-salts the
+    // vault. The key derived above then belongs to the old password and cannot open this
+    // vault, so it is discarded rather than tried.
+    if (masterKey != null && derivedAgainst?.contentEquals(remoteConfig.salt) != true) {
+        println("The master password has changed since this session was saved.")
+        SavedSession.clear()
+        masterKey = null
     }
 
-    print("Deriving key (Argon2id, 64 MiB)... ")
-    System.out.flush()
+    if (masterKey == null) {
+        val password = readMasterPassword("Master password: ") ?: run {
+            System.err.println("No password given.")
+            return
+        }
+        print("Deriving key (Argon2id, 64 MiB)... ")
+        System.out.flush()
+        masterKey = vault.deriveMasterKey(remoteConfig.salt, password)
+        println("done.")
+    }
 
-    val vault = CloudVault()
     val vaultKey = try {
-        vault.unlock(remoteConfig, password)
+        vault.unlockWith(remoteConfig, masterKey)
     } catch (e: Exception) {
-        println()
         System.err.println("${e.message}")
         return
     }
-    println("unlocked.")
+    println("Vault unlocked.")
+
+    // Only now, with the password proven against the vault, is the session worth keeping:
+    // saving earlier would write a file under a key that opens nothing.
+    session.refreshToken?.let { token ->
+        runCatching {
+            SavedSession.save(
+                SavedSession(token, session.email), masterKey, remoteConfig.salt
+            )
+        }.onFailure { println("(Could not save the sign-in for next time: ${it.message})") }
+    }
 
     val browser = CloudBrowser(vault, vaultKey, client)
     if (!browser.refresh()) return
