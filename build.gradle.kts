@@ -36,3 +36,29 @@ tasks.register<Copy>("syncExtension") {
     }
     includeEmptyDirs = false
 }
+
+/**
+ * Zips each browser package.
+ *
+ * Chrome loads an unpacked directory and keeps it across restarts, so the zip is only for
+ * distribution. Firefox is the one that needs it: an unsigned add-on cannot be installed
+ * permanently on release Firefox at all, so the zip is what gets submitted to AMO for
+ * unlisted signing.
+ */
+listOf("chrome", "firefox").forEach { browser ->
+    tasks.register<Zip>("package${browser.replaceFirstChar { it.uppercase() }}Extension") {
+        dependsOn("syncExtension")
+        description = "Zips the $browser extension for distribution or signing."
+        group = "build"
+
+        from("extension/$browser")
+        archiveFileName.set("vaultguard-$browser.zip")
+        destinationDirectory.set(layout.buildDirectory.dir("extension"))
+    }
+}
+
+tasks.register("packageExtensions") {
+    dependsOn("packageChromeExtension", "packageFirefoxExtension")
+    description = "Zips both browser extensions."
+    group = "build"
+}

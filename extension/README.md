@@ -76,6 +76,30 @@ the content script — a page cannot claim to be a site it is not on.
 
 5. Click the extension on a login page.
 
+## Making it stick in Firefox
+
+Release Firefox refuses to permanently install an unsigned add-on, and **ignores**
+`xpinstall.signatures.required` — that preference is only honoured by Developer Edition,
+Nightly and ESR. So there are two routes:
+
+- **Developer Edition, Nightly or ESR** — set `xpinstall.signatures.required` to `false` in
+  `about:config` and install the zip permanently. Quickest, but a second Firefox.
+- **Sign it, unlisted, through addons.mozilla.org** — free, stays private, and the result
+  installs on ordinary Firefox. Submit the zip as an *unlisted* add-on and download the
+  signed `.xpi`.
+
+Either way, build the zip with:
+
+```
+gradlew packageFirefoxExtension
+```
+
+It lands in `build/extension/vaultguard-firefox.zip`.
+
+**Chrome does not have this problem.** An unpacked extension stays loaded across restarts
+as long as Developer mode is on, so it is the quicker path for checking that the whole chain
+works.
+
 ## Editing
 
 `extension/shared` is the source. The two browser directories hold a manifest plus copies.
@@ -91,8 +115,10 @@ gradlew syncExtension
   passes native messaging's binary framing through cleanly is a platform question, not an
   API one, and this project has been caught by that category before. If a browser reports
   the host as unresponsive, look there first.
-- Firefox's temporary add-on is discarded when the browser restarts. Signing it, or using
-  Developer Edition with `xpinstall.signatures.required=false`, makes it persist.
+- **A temporary add-on in Firefox is discarded on restart.** Nothing is wrong when it
+  disappears; that is what "temporary" means. See *Making it stick in Firefox* below.
+- Registering the native messaging host does **not** need a browser restart. The manifest is
+  read when the host is launched, not at startup.
 - Filling picks the first visible password field and the visible text field above it. That
   covers ordinary login forms and will not cover multi-step or shadow-DOM ones.
 - There is no save-on-submit yet: new credentials are added from the CLI, the tray, or the
