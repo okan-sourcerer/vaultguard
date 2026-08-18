@@ -11,9 +11,9 @@ optional Firestore sync). Three modules:
   backup format, the generator, the merge rules. No Android anywhere in it, so a desktop
   client links the same classes rather than reimplementing them.
 - **`:app`** — everything Android: UI, Room, autofill, Keystore, Firebase.
-- **`:desktop`** — a JVM CLI over the v2 backup file: open, generate, add, save. No
-  Firestore, no Keystore, no persisted state of its own. It exists as much to prove
-  `:core` is genuinely portable as to be useful.
+- **`:desktop`** — a JVM CLI with two modes: read/write over a v2 backup file, and
+  **read-only** over the Firestore vault the phone publishes. No Keystore, no local
+  database, no persisted state of its own beyond an OAuth config file.
 
 `:core` and `:app` share the package namespace (`com.vaultguard.app.*`) because the split
 between them is by platform dependency, not by name; `:desktop` is new code and lives in

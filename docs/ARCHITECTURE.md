@@ -40,10 +40,31 @@ What it deliberately does **not** have, and what a fuller client would need to a
 
 | Missing | Why it is not a gap yet |
 | --- | --- |
-| Firestore sync | The next step. The file is the transport for now, which keeps this offline and reversible. |
+| Any write to Firestore | Cloud mode reads only. Push comes after the read path has been exercised against the live vault. |
 | A key at rest | Nothing is persisted. The password is derived per operation and the array is consumed by `KeyDerivation`, so no key outlives the call. |
 | SQLCipher's layer | There is no local database. The only thing on disk is the backup, which is already encrypted end to end. |
 | Clipboard handling | `show` prints to stdout. None of the Android clipboard-clearing machinery (#31, #46) applies or exists here. |
+
+### Cloud mode
+
+`--cloud` signs in with Google over a loopback OAuth redirect, exchanges the resulting
+`id_token` for a Firebase session through the Identity Toolkit REST API, and reads
+`vaults/{uid}` over the Firestore REST API. The session is an ordinary user session, so the
+security rules stay in force — deliberately, rather than reaching for a service account
+that would sidestep them.
+
+Unlocking does not reimplement the key hierarchy. `CloudVault` feeds the fetched
+configuration into `MasterPasswordManager.adoptRemoteSetup` and then follows the phone's
+path: derive the master key, verify it, unwrap the vault key. A configuration with no
+wrapped vault key is refused outright rather than half-opened, which is finding #4 stated
+as a precondition.
+
+`SecurePrefs` on this side is in-memory and dies with the process. There is no Keystore to
+protect a stored salt or wrapped key with, so rather than inventing a weaker at-rest story
+the client stores nothing and pays one Argon2id derivation per run.
+
+Rows that fail to decrypt are reported before anything is listed, never dropped — the
+`VaultSnapshot` contract from #40 applies here exactly as it does on the phone.
 
 A backup exported from the owner's device has been opened with this CLI — key derived,
 vault unlocked, credentials shown correctly. That is the check the fixture below cannot

@@ -82,6 +82,20 @@ blobs nothing could ever read.
 with instructions rather than offering to merge or replace. That flow needs a second device
 to design against.
 
+### The desktop reader
+
+`:desktop --cloud` is a second client against the same documents, and it reads only. It
+authenticates as an ordinary user — loopback OAuth, then Identity Toolkit — so the security
+rules below apply to it unchanged. Nothing about push, cursors or conflicts is involved,
+because it never writes.
+
+It is what makes the wrapped vault key visibly load-bearing. Without `vaultKeyCiphertext`
+in `vaults/{uid}`, the desktop can verify the master password and still not reach a single
+credential; it refuses that case rather than showing an empty vault.
+
+The unbuilt flow above stays unbuilt. The desktop has no vault of its own, so it cannot
+poison an account — but it cannot help design the merge either, because it never pushes.
+
 ## Security note
 
 The Firestore vault document stores `salt`, `verificationCiphertext`, and
