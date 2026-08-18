@@ -1,7 +1,30 @@
 # Architecture
 
-Single-module Android app (`:app`), Kotlin, Jetpack Compose, Hilt, Room over SQLCipher,
+Android app in two Gradle modules, Kotlin, Jetpack Compose, Hilt, Room over SQLCipher,
 optional Firestore sync. Loosely layered along Clean Architecture lines.
+
+## Modules
+
+```
+:core   pure JVM — no Android on the classpath at all
+        security/    KeyDerivation, CryptoManager, MasterPasswordManager, SecurePrefs (interface)
+        domain/      models, repository contracts, GeneratePasswordUseCase, VaultBackupFormat
+        data/        CredentialPayloadCodec, SyncMerge
+        util/        PasswordStrengthEvaluator, MasterPasswordPolicy, CommonPasswords
+           ▲
+           │ implementation(project(":core"))
+:app    everything Android — ui/, Room, autofill/, Keystore, Firebase, Hilt wiring
+```
+
+The split is by platform dependency, not by name: packages stay `com.vaultguard.app.*` on
+both sides, so moving a file between them changes no imports.
+
+The reason for it is that a second client — a desktop app — must not carry its own copy of
+the derivation or the payload format. A frozen Argon2id configuration and a UTF-16BE
+password encoding are only safe while exactly one implementation exists, and the
+golden-vector test guards that one. `SecurePrefs` is the seam that lets the most
+security-critical class, `MasterPasswordManager`, sit in `:core`: the Keystore-backed
+implementation (`EncryptedSharedPrefs`) stays in `:app`.
 
 ## Dependency flow
 

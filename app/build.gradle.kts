@@ -74,6 +74,10 @@ ksp {
 }
 
 dependencies {
+    // Crypto, the payload contract, the backup format, the generator, the merge rules.
+    // Shared with any desktop client so the two cannot disagree — see core/build.gradle.kts.
+    implementation(project(":core"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -134,6 +138,7 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.json)
     testImplementation(libs.bouncycastle)
+    testImplementation(testFixtures(project(":core")))
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.room.testing)
     androidTestImplementation(libs.androidx.espresso.core)

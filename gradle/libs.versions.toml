@@ -28,6 +28,7 @@ timber = "5.0.1"
 googleGmsGoogleServices = "4.4.4"
 mockk = "1.13.13"
 json = "20240303"
+javaxInject = "1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -74,6 +75,10 @@ play-services-auth = { group = "com.google.android.gms", name = "play-services-a
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncyCastle" }
 
+# JSR-330 annotations. :core carries @Inject/@Singleton without depending on Hilt,
+# so the same classes wire up under Hilt on Android and by hand on the desktop.
+javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javaxInject" }
+
 # Biometric
 biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 
@@ -81,6 +86,7 @@ biometric = { group = "androidx.biometric", name = "biometric", version.ref = "b
 androidx-autofill = { group = "androidx.autofill", name = "autofill", version.ref = "autofill" }
 
 # Coroutines
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
@@ -104,6 +110,7 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 google-gms-google-services = { id = "com.google.gms.google-services", version.ref = "googleGmsGoogleServices" }

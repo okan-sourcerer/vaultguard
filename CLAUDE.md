@@ -5,7 +5,15 @@ Guidance for agents working in this repository.
 ## What this is
 
 VaultGuard is an Android password manager (Kotlin, Compose, Hilt, Room over SQLCipher,
-optional Firestore sync). Single module, `:app`.
+optional Firestore sync). Two modules:
+
+- **`:core`** — pure JVM. Key derivation, AES-GCM, the credential payload contract, the
+  backup format, the generator, the merge rules. No Android anywhere in it, so a desktop
+  client can link the same classes rather than reimplement them.
+- **`:app`** — everything Android: UI, Room, autofill, Keystore, Firebase.
+
+Package names are identical across the two (`com.vaultguard.app.*`); the split is by
+platform dependency, not by name.
 
 **There is a live vault with the owner's real passwords on one device.** This is not a
 scratch project. Correctness beats elegance, and any change that could orphan or corrupt
@@ -101,8 +109,10 @@ what a method signature says, assume it needs exercising on a device before it i
 ## Commands
 
 ```bash
-./gradlew :app:testDebugUnitTest
+./gradlew test :app:testDebugUnitTest
 ```
+
+(`test` covers `:core`; the Android module needs its own task.)
 
 ```bash
 ./gradlew :app:assembleDebug
@@ -131,13 +141,20 @@ with it, and the vault becomes unrecoverable. Check the signing certificate inst
 
 ## Testing notes
 
-- `CryptoManager`, `KeyDerivation`, `GeneratePasswordUseCase`, `PasswordStrengthEvaluator`,
-  `CredentialMatcher`, `FieldClassifier` and `SyncMerge` are pure JVM — no Robolectric.
-- `org.json` is stubbed in bare unit tests; the real implementation is on the test
-  classpath via `org.json:json`. Prefer `java.util.Base64` over `android.util.Base64` in
-  new code — identical output for this app's flags, and not a stub in tests.
+- Everything in `:core` is pure JVM by construction — no Robolectric, no android.jar.
+  `CredentialMatcher` and `FieldClassifier` are still in `:app`: `FieldClassifier` needs
+  `android.text.InputType`, and splitting the pair across modules is how the two matchers
+  drifted apart last time (#11).
+- `org.json` is a `compileOnly` dependency in `:core` — Android ships it in the framework,
+  so an `implementation` copy would put a second one on the runtime classpath. `:core`'s
+  tests get the real jar, and any new consumer (a desktop module) must declare its own.
+  Prefer `java.util.Base64` over `android.util.Base64` in new code — identical output for
+  this app's flags, and not a stub in tests.
 - `MasterPasswordManager` and `BiometricAuthManager` take a `SecurePrefs`; use
-  `FakeSecurePrefs` off-device. `FakeBiometricKeystore` stands in for the Android Keystore
+  `FakeSecurePrefs` off-device. It is a **test fixture of `:core`**
+  (`core/src/testFixtures`), so `:app` reaches it through
+  `testImplementation(testFixtures(project(":core")))` rather than keeping a second copy.
+  `FakeBiometricKeystore` stands in for the Android Keystore
   and is backed by real AES-GCM, so replacing a key genuinely breaks prior material — one
   test asserts that, so the others mean something.
 - Room migrations need `androidx.room:room-testing` and run as instrumented tests against

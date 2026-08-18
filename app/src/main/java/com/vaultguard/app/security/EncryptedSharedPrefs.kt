@@ -6,21 +6,8 @@ import androidx.security.crypto.MasterKey
 import androidx.core.content.edit
 
 /**
- * Narrow view of the Keystore-encrypted preference store.
- *
- * Extracted so [MasterPasswordManager] can be tested on the host JVM. It previously built
- * an [EncryptedSharedPreferences] inline on every access, which made the most
- * security-critical class in the app impossible to exercise off-device — and it is the
- * class where an untested mistake orphans the vault.
- */
-interface SecurePrefs {
-    fun getString(key: String): String?
-    fun putAll(values: Map<String, String>)
-    fun remove(keys: Collection<String>)
-}
-
-/**
- * The real store.
+ * The real store — the Android implementation of [SecurePrefs], which is declared in
+ * `:core` alongside its only consumer.
  *
  * **Every constant here is frozen.** The file name, the key names, and the two encryption
  * schemes together determine whether an existing install can still read its own salt. A
