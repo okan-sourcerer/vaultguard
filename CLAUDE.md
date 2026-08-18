@@ -34,9 +34,15 @@ what is left.
 Both debug and minified release builds have been installed and exercised on the owner's
 device: vault loads, biometrics, autofill, and clipboard clearing all confirmed working.
 
-The `:desktop` CLI has been run against a backup exported from that device: it derives the
-key, opens the vault and shows the credentials correctly. The shared `:core` classes are
+The `:desktop` CLI has been exercised against real data in both of its modes: a backup
+exported from that device, and the live Firestore vault over `--cloud`. Both derive the
+key, open the vault and show the credentials correctly. The shared `:core` classes are
 therefore confirmed to port off Android, not merely assumed to.
+
+The cloud path only worked after #64 — a vault config published before the vault-key
+conversion never had its wrapped key republished, so a second client could verify the
+master password and reach nothing. That defect was invisible to 350-odd passing tests and
+to the phone, which reads its own local copy. A second client is what found it.
 
 ## Read before editing
 

@@ -106,6 +106,10 @@ credential; it refuses that case rather than showing an empty vault.
 The unbuilt flow above stays unbuilt. The desktop has no vault of its own, so it cannot
 poison an account — but it cannot help design the merge either, because it never pushes.
 
+Confirmed against the owner's live vault: sign-in, config fetch, unlock and decryption of
+every row. It required the #64 fix first — before that the cloud config carried no wrapped
+vault key and the reader correctly refused to pretend the vault was empty.
+
 ## Security note
 
 The Firestore vault document stores `salt`, `verificationCiphertext`, and

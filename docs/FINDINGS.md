@@ -291,6 +291,9 @@ could not reach a single credential — finding #4 arriving by a different road.
 The decision now lives in `SyncMerge.configAction`, which has three outcomes rather than
 two, and is tested off Firestore like the rest of the merge rules.
 
+Confirmed on the owner's account: after one sync from the phone, the desktop reader opens
+the vault and lists every credential.
+
 Full analysis in [SYNC.md](SYNC.md).
 
 ## P3 — Business logic and UX contradictions
