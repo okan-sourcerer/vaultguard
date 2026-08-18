@@ -1,6 +1,6 @@
 # Architecture
 
-Android app in two Gradle modules, Kotlin, Jetpack Compose, Hilt, Room over SQLCipher,
+Android app in three Gradle modules, Kotlin, Jetpack Compose, Hilt, Room over SQLCipher,
 optional Firestore sync. Loosely layered along Clean Architecture lines.
 
 ## Modules
@@ -11,9 +11,12 @@ optional Firestore sync. Loosely layered along Clean Architecture lines.
         domain/      models, repository contracts, GeneratePasswordUseCase, VaultBackupFormat
         data/        CredentialPayloadCodec, SyncMerge
         util/        PasswordStrengthEvaluator, MasterPasswordPolicy, CommonPasswords
-           ▲
-           │ implementation(project(":core"))
-:app    everything Android — ui/, Room, autofill/, Keystore, Firebase, Hilt wiring
+           ▲                        ▲
+           │                        │ implementation(project(":core"))
+           │                        │
+:app    everything Android      :desktop   JVM CLI over the backup file
+        ui/, Room, autofill/,              com.vaultguard.desktop
+        Keystore, Firebase, Hilt
 ```
 
 The split is by platform dependency, not by name: packages stay `com.vaultguard.app.*` on
@@ -25,6 +28,28 @@ password encoding are only safe while exactly one implementation exists, and the
 golden-vector test guards that one. `SecurePrefs` is the seam that lets the most
 security-critical class, `MasterPasswordManager`, sit in `:core`: the Keystore-backed
 implementation (`EncryptedSharedPrefs`) stays in `:app`.
+
+### `:desktop`
+
+A CLI that opens a format-v2 backup, generates passwords, adds entries and writes the file
+back. `BackupFile.write` performs the same sequence as `ExportVaultUseCase` — fresh salt,
+derive, `writeEntries`, encrypt, `writeEnvelope` — because both call the same `:core`
+code; the desktop side adds only file I/O and an atomic replace.
+
+What it deliberately does **not** have, and what a fuller client would need to answer for:
+
+| Missing | Why it is not a gap yet |
+| --- | --- |
+| Firestore sync | The next step. The file is the transport for now, which keeps this offline and reversible. |
+| A key at rest | Nothing is persisted. The password is derived per operation and the array is consumed by `KeyDerivation`, so no key outlives the call. |
+| SQLCipher's layer | There is no local database. The only thing on disk is the backup, which is already encrypted end to end. |
+| Clipboard handling | `show` prints to stdout. None of the Android clipboard-clearing machinery (#31, #46) applies or exists here. |
+
+`desktop/src/test/resources/sample-vault.vgbackup` is a committed encrypted fixture,
+written by the CLI itself, opened by a test under a known password. It pins the Argon2id
+parameters, the UTF-16BE encoding, the AES-GCM layer, the envelope shape and the payload
+JSON in one artefact. Like the golden vector, a failure means real backups have stopped
+opening — do not regenerate it to make it pass.
 
 ## Dependency flow
 

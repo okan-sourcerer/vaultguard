@@ -26,4 +26,5 @@ rootProject.name = "VaultGuard"
 // derived or a payload is shaped. See docs/ARCHITECTURE.md.
 include(":core")
 include(":app")
+include(":desktop")
  

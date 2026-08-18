@@ -5,15 +5,19 @@ Guidance for agents working in this repository.
 ## What this is
 
 VaultGuard is an Android password manager (Kotlin, Compose, Hilt, Room over SQLCipher,
-optional Firestore sync). Two modules:
+optional Firestore sync). Three modules:
 
 - **`:core`** — pure JVM. Key derivation, AES-GCM, the credential payload contract, the
   backup format, the generator, the merge rules. No Android anywhere in it, so a desktop
-  client can link the same classes rather than reimplement them.
+  client links the same classes rather than reimplementing them.
 - **`:app`** — everything Android: UI, Room, autofill, Keystore, Firebase.
+- **`:desktop`** — a JVM CLI over the v2 backup file: open, generate, add, save. No
+  Firestore, no Keystore, no persisted state of its own. It exists as much to prove
+  `:core` is genuinely portable as to be useful.
 
-Package names are identical across the two (`com.vaultguard.app.*`); the split is by
-platform dependency, not by name.
+`:core` and `:app` share the package namespace (`com.vaultguard.app.*`) because the split
+between them is by platform dependency, not by name; `:desktop` is new code and lives in
+`com.vaultguard.desktop`.
 
 **There is a live vault with the owner's real passwords on one device.** This is not a
 scratch project. Correctness beats elegance, and any change that could orphan or corrupt
@@ -125,6 +129,14 @@ what a method signature says, assume it needs exercising on a device before it i
 ```bash
 ./gradlew :app:assembleRelease
 ```
+
+```bash
+./gradlew :desktop:installDist
+```
+
+That last one produces `desktop/build/install/vaultguard/bin/vaultguard <backup-file>`.
+Run it from a real terminal — without a console the JVM cannot suppress echo, so the
+backup password is typed in the clear (the CLI says so rather than pretending).
 
 The release build is minified and debug-signed so it can be installed locally — the same
 certificate as debug, so it upgrades in place and keeps the vault. Replace the signing

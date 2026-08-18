@@ -1,0 +1,3 @@
+# The backup fixture is a byte-stable artefact: a test opens it under a fixed password to
+# prove the derivation, envelope and payload have not moved. Never let it be normalised.
+*.vgbackup -text
