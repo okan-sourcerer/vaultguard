@@ -34,6 +34,10 @@ what is left.
 Both debug and minified release builds have been installed and exercised on the owner's
 device: vault loads, biometrics, autofill, and clipboard clearing all confirmed working.
 
+The `:desktop` CLI has been run against a backup exported from that device: it derives the
+key, opens the vault and shows the credentials correctly. The shared `:core` classes are
+therefore confirmed to port off Android, not merely assumed to.
+
 ## Read before editing
 
 | Before touching | Read |

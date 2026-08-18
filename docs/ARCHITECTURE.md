@@ -45,6 +45,11 @@ What it deliberately does **not** have, and what a fuller client would need to a
 | SQLCipher's layer | There is no local database. The only thing on disk is the backup, which is already encrypted end to end. |
 | Clipboard handling | `show` prints to stdout. None of the Android clipboard-clearing machinery (#31, #46) applies or exists here. |
 
+A backup exported from the owner's device has been opened with this CLI — key derived,
+vault unlocked, credentials shown correctly. That is the check the fixture below cannot
+make: the fixture proves the pipeline has not moved since it was written, while only a
+file from the phone proves the two implementations agreed in the first place.
+
 `desktop/src/test/resources/sample-vault.vgbackup` is a committed encrypted fixture,
 written by the CLI itself, opened by a test under a known password. It pins the Argon2id
 parameters, the UTF-16BE encoding, the AES-GCM layer, the envelope shape and the payload
