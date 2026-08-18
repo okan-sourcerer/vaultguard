@@ -153,4 +153,94 @@ class SyncMergeTest {
         assertEquals(1, SyncMerge.batched((1..450).toList()).size)
         assertEquals(2, SyncMerge.batched((1..451).toList()).size)
     }
+
+    // -- The vault config -------------------------------------------------------------
+
+    private val saltA = ByteArray(16) { it.toByte() }
+    private val saltB = ByteArray(16) { (it + 1).toByte() }
+
+    @Test
+    fun `no remote config at all means publish`() {
+        assertEquals(
+            SyncMerge.ConfigAction.Publish,
+            SyncMerge.configAction(
+                remoteSalt = null,
+                remoteHasWrappedKey = false,
+                localSalt = saltA,
+                localHasWrappedKey = true
+            )
+        )
+    }
+
+    @Test
+    fun `a different salt is refused`() {
+        assertEquals(
+            SyncMerge.ConfigAction.Refuse,
+            SyncMerge.configAction(
+                remoteSalt = saltB,
+                remoteHasWrappedKey = true,
+                localSalt = saltA,
+                localHasWrappedKey = true
+            )
+        )
+    }
+
+    @Test
+    fun `a matching complete config is left alone`() {
+        assertEquals(
+            SyncMerge.ConfigAction.Proceed,
+            SyncMerge.configAction(
+                remoteSalt = saltA,
+                remoteHasWrappedKey = true,
+                localSalt = saltA,
+                localHasWrappedKey = true
+            )
+        )
+    }
+
+    @Test
+    fun `a matching config missing the wrapped key is republished`() {
+        // #64. This is the case that used to fall through both branches: the config
+        // existed and the salt matched, so nothing republished, and the wrapped vault key
+        // never reached the cloud. A second device could then verify the master password
+        // and reach nothing at all.
+        assertEquals(
+            SyncMerge.ConfigAction.Publish,
+            SyncMerge.configAction(
+                remoteSalt = saltA,
+                remoteHasWrappedKey = false,
+                localSalt = saltA,
+                localHasWrappedKey = true
+            )
+        )
+    }
+
+    @Test
+    fun `an unconverted local vault publishes nothing extra`() {
+        // Neither side has a wrapped key yet: the local vault is still encrypted directly
+        // under the master key. There is nothing to publish, and republishing the same
+        // salt and blob every sync would be noise.
+        assertEquals(
+            SyncMerge.ConfigAction.Proceed,
+            SyncMerge.configAction(
+                remoteSalt = saltA,
+                remoteHasWrappedKey = false,
+                localSalt = saltA,
+                localHasWrappedKey = false
+            )
+        )
+    }
+
+    @Test
+    fun `a differing salt is refused even when the remote looks complete`() {
+        assertEquals(
+            SyncMerge.ConfigAction.Refuse,
+            SyncMerge.configAction(
+                remoteSalt = saltB,
+                remoteHasWrappedKey = false,
+                localSalt = saltA,
+                localHasWrappedKey = true
+            )
+        )
+    }
 }

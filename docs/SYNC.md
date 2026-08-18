@@ -78,6 +78,16 @@ If a sync finds a remote config whose salt differs from the local one, sync swit
 off and says so. Uploading local rows into a vault keyed differently would fill it with
 blobs nothing could ever read.
 
+The config is published when the cloud holds none, **and** when the cloud holds one that
+matches but carries no wrapped vault key. That second case is not hypothetical: a config
+published before the vault was converted to the vault-key layout has a salt and a
+verification blob and nothing else, and conversion leaves the salt alone, so the older
+one-branch logic saw a matching config and republished nothing for ever (#64). The write
+merges, so republishing adds the missing key rather than rewriting what is there.
+
+The three outcomes live in `SyncMerge.configAction`, away from Firestore, for the same
+reason the row rules do.
+
 **Not yet built:** joining an account that already holds a different vault. It is refused
 with instructions rather than offering to merge or replace. That flow needs a second device
 to design against.

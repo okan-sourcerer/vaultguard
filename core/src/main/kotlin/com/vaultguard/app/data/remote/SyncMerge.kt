@@ -69,6 +69,55 @@ object SyncMerge {
         return Decision.Conflict
     }
 
+    // -- The vault config ---------------------------------------------------------------
+
+    /** What a sync should do about `vaults/{uid}` before it starts exchanging rows. */
+    sealed interface ConfigAction {
+        /** Write the local configuration to the cloud. */
+        data object Publish : ConfigAction
+
+        /** The account holds a different vault; do not mix them. */
+        data object Refuse : ConfigAction
+
+        /** The cloud copy is complete and matches. */
+        data object Proceed : ConfigAction
+    }
+
+    /**
+     * Decides whether the remote vault configuration needs (re)publishing.
+     *
+     * The third case is the one that is easy to miss, and did get missed. Publishing used
+     * to happen only when the cloud held no configuration at all. A vault whose config was
+     * published *before* it was converted to the vault-key layout therefore carried a salt
+     * and a verification blob and no wrapped vault key — and conversion does not change the
+     * salt, so every later sync saw a configuration that existed and matched, and never
+     * republished. The wrapped key could not arrive by any route short of a master-password
+     * change (#64).
+     *
+     * The visible consequence was a second device that could verify the master password and
+     * reach nothing, which is finding #4 arriving by a different road.
+     *
+     * @param remoteSalt null when the cloud holds no configuration at all.
+     */
+    fun configAction(
+        remoteSalt: ByteArray?,
+        remoteHasWrappedKey: Boolean,
+        localSalt: ByteArray,
+        localHasWrappedKey: Boolean
+    ): ConfigAction = when {
+        remoteSalt == null -> ConfigAction.Publish
+
+        // Uploading local rows into a vault keyed differently would fill it with blobs
+        // nothing could ever read.
+        !remoteSalt.contentEquals(localSalt) -> ConfigAction.Refuse
+
+        // Same vault, incomplete copy: publish what the cloud is missing. The write merges,
+        // so this adds the wrapped key rather than rewriting anything already there.
+        !remoteHasWrappedKey && localHasWrappedKey -> ConfigAction.Publish
+
+        else -> ConfigAction.Proceed
+    }
+
     /**
      * Firestore rejects a batch above 500 operations. Pushing every row in one commit meant
      * that any vault over that size failed to sync outright, and the master-password sweep

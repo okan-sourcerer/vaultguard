@@ -17,6 +17,7 @@ Status values: `open`, `in progress`, `fixed`, `won't fix`.
 | P4 — build and hygiene (#41–#46) | all fixed except the Credential Manager migration |
 | P1b — autofill usability (#47–#56) | all fixed |
 | P5 — flow and interaction (#57–#63) | all fixed |
+| P6 — found by the desktop client (#64) | all fixed |
 
 **Still open**, all deliberate rather than forgotten:
 
@@ -274,6 +275,21 @@ one-minute case as "1 minutes".
 | 22 | Anon→Google config migration skipped when no credentials exist | `data/remote/FirebaseSyncService.kt:195` | **obsolete** (chunk 10) |
 | 23 | Last-write-wins with arbitrary tiebreak; conflicts silently discarded | `data/remote/FirebaseSyncService.kt:117-119` | **fixed** (chunk 10) |
 | 24 | Tombstones never purged, locally or remotely | schema-wide | **fixed** (chunk 10) |
+| 64 | Wrapped vault key never republished to an existing cloud config | `data/remote/FirebaseSyncService.kt:193` | **fixed** (chunk 16) |
+
+**#64** — `fullSync` published the vault configuration only when the cloud held none.
+A vault whose config was published *before* it was converted to the vault-key layout
+therefore carried a salt and a verification blob and no wrapped vault key, and conversion
+does not change the salt, so every subsequent sync found a config that existed and matched
+and republished nothing. Short of a master-password change, the wrapped key had no route
+to the cloud at all.
+
+Invisible from the phone, which reads its own local copy. It surfaced the first time a
+second client tried to open the vault: the desktop reader verified the master password and
+could not reach a single credential — finding #4 arriving by a different road.
+
+The decision now lives in `SyncMerge.configAction`, which has three outcomes rather than
+two, and is tested off Firestore like the rest of the merge rules.
 
 Full analysis in [SYNC.md](SYNC.md).
 

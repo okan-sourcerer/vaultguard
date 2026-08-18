@@ -191,20 +191,36 @@ class FirebaseSyncService @Inject constructor(
         requireEnabled()
 
         val remoteConfig = runCatching { pullVaultConfig() }.getOrNull()
-        if (remoteConfig == null) {
-            // First device on this account.
-            runCatching { pushVaultConfig() }
-                .onFailure { Timber.w(it, "Could not publish vault config") }
-        } else if (!remoteConfig.salt.contentEquals(masterPasswordManager.getSalt())) {
-            // A vault from elsewhere. Uploading local rows now would put blobs encrypted
-            // under this device's key into a vault keyed differently, which nothing could
-            // ever read — the poisoning half of #4. Refuse rather than guess.
-            syncPreferences.isEnabled = false
-            throw IllegalStateException(
-                "This account already holds a different vault. Sync has been turned off to " +
-                    "avoid mixing the two. Export a backup, then either delete the cloud " +
-                    "vault from Settings or import into a fresh install."
-            )
+
+        // The decision lives in SyncMerge so it can be exercised without Firestore, which
+        // is the same reason the row-merge rules live there. It has three outcomes, not
+        // two: a configuration can exist, match, and still be missing the wrapped vault
+        // key (#64).
+        val action = SyncMerge.configAction(
+            remoteSalt = remoteConfig?.salt,
+            remoteHasWrappedKey = remoteConfig?.vaultKeyCiphertext != null,
+            localSalt = masterPasswordManager.getSalt(),
+            localHasWrappedKey = masterPasswordManager.hasWrappedVaultKey
+        )
+
+        when (action) {
+            SyncMerge.ConfigAction.Publish ->
+                runCatching { pushVaultConfig() }
+                    .onFailure { Timber.w(it, "Could not publish vault config") }
+
+            SyncMerge.ConfigAction.Refuse -> {
+                // A vault from elsewhere. Uploading local rows now would put blobs encrypted
+                // under this device's key into a vault keyed differently, which nothing could
+                // ever read — the poisoning half of #4. Refuse rather than guess.
+                syncPreferences.isEnabled = false
+                throw IllegalStateException(
+                    "This account already holds a different vault. Sync has been turned off to " +
+                        "avoid mixing the two. Export a backup, then either delete the cloud " +
+                        "vault from Settings or import into a fresh install."
+                )
+            }
+
+            SyncMerge.ConfigAction.Proceed -> Unit
         }
 
         val pushed = pushPending()
