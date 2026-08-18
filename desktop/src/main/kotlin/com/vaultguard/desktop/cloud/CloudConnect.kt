@@ -96,7 +96,7 @@ object CloudConnect {
 
         val remoteConfig = RemoteVaultCodec.readVaultConfig(document)
         if (remoteConfig == null) {
-            warn("The cloud vault document is incomplete — it carries no usable configuration.")
+            warn("The cloud vault document is incomplete - it carries no usable configuration.")
             return null
         }
 

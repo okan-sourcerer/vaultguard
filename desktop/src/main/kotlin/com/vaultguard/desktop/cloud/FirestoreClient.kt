@@ -17,7 +17,7 @@ class FirestoreException(message: String) : Exception(message)
  * and look at what the other device did before deciding again.
  */
 class StaleWriteException :
-    Exception("That entry changed on another device since it was last fetched. Nothing was written — `refresh` and try again.")
+    Exception("That entry changed on another device since it was last fetched. Nothing was written - `refresh` and try again.")
 
 /**
  * The parts of the Firestore REST API this client needs: reads, and creating a credential.

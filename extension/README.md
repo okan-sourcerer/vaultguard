@@ -50,16 +50,31 @@ the content script — a page cannot claim to be a site it is not on.
    - **Firefox** — `about:debugging#/runtime/this-firefox`, *Load Temporary Add-on*,
      choose `extension/firefox/manifest.json`.
 
-3. Register the native messaging host, passing the Chrome ID from step 2:
+3. Register the native messaging host.
 
    ```
-   vaultguard --install-bridge <chrome-extension-id>
+   vaultguard --install-bridge                       # Firefox only
+   vaultguard --install-bridge <chrome-extension-id> # also Chrome
    ```
 
-   On Windows this prints two `reg add` commands. Run them yourself — they change your
-   browser configuration, so they are not run for you.
+   **Firefox needs no id.** It is matched by the add-on id in its own manifest
+   (`vaultguard@vaultguard.local`). The UUID `about:debugging` shows is Firefox's internal
+   per-install identifier for `moz-extension://` origins, and is not what goes here.
+   The argument is the **Chrome** extension id from `chrome://extensions`.
 
-4. Unlock from the tray icon, then click the extension on a login page.
+   On Windows this prints a `reg add` command per browser. Run them yourself — they change
+   your browser configuration, so they are not run for you.
+
+4. Start the service and unlock it:
+
+   ```
+   vaultguard --service
+   ```
+
+   The extension talks to `--service`, not to `--cloud`. `--cloud` is the interactive CLI
+   and exits when you leave it; the bridge only exists while the tray service runs.
+
+5. Click the extension on a login page.
 
 ## Editing
 

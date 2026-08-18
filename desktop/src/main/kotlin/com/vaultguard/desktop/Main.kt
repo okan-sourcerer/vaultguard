@@ -76,31 +76,39 @@ private fun cloudSetup() {
         println("Wrote a configuration template to ${path.path}")
         println("Fill it in, then run `vaultguard --cloud`.")
     } else {
-        println("${path.path} already exists — leaving it alone.")
+        println("${path.path} already exists - leaving it alone.")
     }
     println()
     println(DesktopConfig.template)
 }
 
 private fun installBridge(chromeExtensionId: String?) {
-    val launcher = File(
-        File(System.getProperty("user.dir")),
-        if (System.getProperty("os.name").orEmpty().lowercase().contains("win")) {
-            "desktop/build/install/vaultguard/bin/vaultguard.bat"
-        } else {
-            "desktop/build/install/vaultguard/bin/vaultguard"
-        }
-    )
+    val report = BridgeInstall.install(chromeExtensionId, BridgeInstall.locateLauncher())
 
-    println("Registering the native messaging host.")
+    if (!report.succeeded) {
+        report.problems.forEach { System.err.println(it) }
+        return
+    }
+
+    println("Registered the native messaging host.")
     println()
-    BridgeInstall.install(chromeExtensionId, launcher).forEach { println(it) }
+    report.written.forEach { println("  $it") }
+
+    if (report.registryCommands.isNotEmpty()) {
+        println()
+        println("Windows finds the host through the registry, so run these yourself -")
+        println("they change your browser configuration and are yours to make knowingly:")
+        println()
+        report.registryCommands.forEach { println(it) }
+    }
+
     println()
-    println("The host manifest points at the launcher above. On Windows the browsers find")
-    println("it through the registry, so run the `reg add` line(s) printed above yourself —")
-    println("they change your browser configuration and are yours to make knowingly.")
-    println()
-    println("The launcher must pass --native-host through. If you moved it, re-run this.")
+    if (chromeExtensionId.isNullOrBlank()) {
+        println("Firefox needs no id: it is matched by the one in the extension manifest.")
+        println("For Chrome, re-run with the id from chrome://extensions.")
+    }
+    println("Then start the service with `vaultguard --service` - the extension talks to")
+    println("that, not to `--cloud`.")
 }
 
 private fun cloudSignOut() {

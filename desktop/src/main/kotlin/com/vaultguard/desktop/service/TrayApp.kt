@@ -147,7 +147,7 @@ class TrayApp(
             ServiceState.SIGNED_OUT -> "Signed out"
             ServiceState.LOCKED -> "Locked"
             ServiceState.UNLOCKED -> buildString {
-                append("Unlocked — ").append(service.entryCount).append(" entries")
+                append("Unlocked - ").append(service.entryCount).append(" entries")
                 if (service.undecryptableCount > 0) {
                     append(" (").append(service.undecryptableCount).append(" unreadable)")
                 }
@@ -161,11 +161,11 @@ class TrayApp(
         signOutItem.isEnabled = state != ServiceState.SIGNED_OUT
 
         trayIcon.image = icon(locked = state != ServiceState.UNLOCKED)
-        trayIcon.toolTip = "VaultGuard — ${statusItem.label}"
+        trayIcon.toolTip = "VaultGuard - ${statusItem.label}"
     }
 
     private fun status(message: String) = SwingUtilities.invokeLater {
-        trayIcon.toolTip = "VaultGuard — $message"
+        trayIcon.toolTip = "VaultGuard - $message"
     }
 
     private fun notify(caption: String, text: String) = SwingUtilities.invokeLater {
@@ -189,7 +189,7 @@ class TrayApp(
 
         val show = Runnable {
             val option = JOptionPane.showConfirmDialog(
-                null, field, "VaultGuard — $label",
+                null, field, "VaultGuard - $label",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
             )
             result[0] = if (option == JOptionPane.OK_OPTION) field.password else null

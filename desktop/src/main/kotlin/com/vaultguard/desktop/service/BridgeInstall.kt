@@ -50,18 +50,51 @@ object BridgeInstall {
     }
 
     /**
-     * @param launcher the command the browser should run. Must be an executable, not a
-     *        jar: browsers exec it directly with no shell.
+     * What an install did, and what is left for the user to do.
+     *
+     * Separated from the printing so nothing can announce a step that did not happen — the
+     * first version printed "run the reg add lines above" unconditionally, including when
+     * it had bailed out and printed none.
      */
-    fun install(chromeExtensionId: String?, installedLauncher: File): List<String> {
-        val done = mutableListOf<String>()
+    data class Report(
+        val written: List<String> = emptyList(),
+        val registryCommands: List<String> = emptyList(),
+        val problems: List<String> = emptyList()
+    ) {
+        val succeeded: Boolean get() = problems.isEmpty()
+    }
 
-        if (!installedLauncher.exists()) {
-            return listOf(
-                "Launcher not found at ${installedLauncher.path}. " +
-                    "Run `gradlew :desktop:installDist` first."
+    /**
+     * Finds the launcher the browser should run, by asking where this code is loaded from.
+     *
+     * The first version guessed it from the working directory, so running the command from
+     * anywhere but the repository root found nothing and reported a missing build. A
+     * process knows where it lives; it does not know where it was started from.
+     */
+    fun locateLauncher(): File? {
+        val source = runCatching {
+            File(BridgeInstall::class.java.protectionDomain.codeSource.location.toURI())
+        }.getOrNull() ?: return null
+
+        // .../vaultguard/lib/desktop.jar -> .../vaultguard
+        val appHome = source.parentFile?.parentFile ?: return null
+        val name = if (isWindows) "vaultguard.bat" else "vaultguard"
+        return File(File(appHome, "bin"), name).takeIf { it.exists() }
+    }
+
+    fun install(chromeExtensionId: String?, installedLauncher: File?): Report {
+        if (installedLauncher == null || !installedLauncher.exists()) {
+            return Report(
+                problems = listOf(
+                    "Could not find the installed launcher.",
+                    "Run `gradlew :desktop:installDist`, then run this from",
+                    "desktop/build/install/vaultguard/bin/vaultguard."
+                )
             )
         }
+
+        val done = mutableListOf<String>()
+        val registry = mutableListOf<String>()
 
         // A native-messaging manifest names an executable and cannot pass it arguments, so
         // the browser would run the launcher with none and get the usage text down the
@@ -72,7 +105,7 @@ object BridgeInstall {
         val directories = manifestDirectories()
 
         if (chromeExtensionId.isNullOrBlank()) {
-            done += "Skipped Chrome: no extension id given."
+            done += "Chrome: skipped, no extension id given (Firefox does not need one)."
         } else {
             val manifest = baseManifest(launcher).put(
                 "allowed_origins",
@@ -82,7 +115,7 @@ object BridgeInstall {
             write(file, manifest)
             done += "Chrome host manifest: ${file.path}"
             if (isWindows) {
-                done += registryInstruction(
+                registry += registryInstruction(
                     "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\$HOST_NAME", file
                 )
             }
@@ -95,12 +128,12 @@ object BridgeInstall {
         write(firefoxFile, firefoxManifest)
         done += "Firefox host manifest: ${firefoxFile.path}"
         if (isWindows) {
-            done += registryInstruction(
+            registry += registryInstruction(
                 "HKCU\\Software\\Mozilla\\NativeMessagingHosts\\$HOST_NAME", firefoxFile
             )
         }
 
-        return done
+        return Report(written = done, registryCommands = registry)
     }
 
     /**
