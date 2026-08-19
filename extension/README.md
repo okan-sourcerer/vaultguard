@@ -76,6 +76,24 @@ the content script — a page cannot claim to be a site it is not on.
 
 5. Click the extension on a login page.
 
+## Data collection declaration
+
+Firefox 140 onwards requires every new AMO submission to say what it collects, including
+saying that it collects nothing. The Firefox manifest declares:
+
+```json
+"data_collection_permissions": { "required": ["none"] }
+```
+
+That is accurate rather than convenient. The extension reads the active tab's URL to match
+against, receives a name and username list, and pushes one password into one form — all of
+it between the browser and a process on the same machine. Nothing is transmitted anywhere,
+so there is no category to declare. `"none"` is a terminal value and cannot be combined
+with one.
+
+The declaration pushes `strict_min_version` to 140.0, since older Firefox does not
+understand the key.
+
 ## Making it stick in Firefox
 
 Release Firefox refuses to permanently install an unsigned add-on, and **ignores**
