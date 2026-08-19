@@ -4,7 +4,7 @@ body {
   font: 13px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
   margin: 0;
   padding: 10px 12px 12px;
-  min-width: 280px;
+  min-width: 300px;
 }
 
 header {
@@ -27,6 +27,40 @@ button {
 }
 
 button:hover { background: rgba(128, 128, 128, 0.15); }
+
+/* The three states are visually distinct on purpose: "service not running",
+   "vault locked" and "connected" need different actions, and a single grey
+   sentence for all of them is what made a hung popup hard to place. */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: rgb(150, 150, 150);
+}
+
+.status.ok .dot     { background: rgb(58, 158, 96); }
+.status.locked .dot { background: rgb(210, 154, 46); }
+.status.error .dot  { background: rgb(199, 74, 74); }
+
+.status.checking .dot { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+#detail {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: rgba(128, 128, 128, 1);
+}
 
 #message { margin: 0; color: rgba(128, 128, 128, 1); }
 #message:empty { display: none; }

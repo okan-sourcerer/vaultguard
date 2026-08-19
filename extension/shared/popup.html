@@ -7,8 +7,15 @@
     <span id="title">VaultGuard</span>
     <button id="lock" hidden title="Lock the vault">Lock</button>
   </header>
+
+  <div id="status" class="status checking">
+    <span class="dot"></span>
+    <span id="statusText">Checking...</span>
+  </div>
+
   <p id="message"></p>
   <ul id="entries"></ul>
+
   <script src="browser-polyfill.js"></script>
   <script src="popup.js"></script>
 </body>

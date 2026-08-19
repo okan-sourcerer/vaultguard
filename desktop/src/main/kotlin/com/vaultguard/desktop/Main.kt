@@ -10,6 +10,7 @@ import com.vaultguard.desktop.cloud.SavedSession
 import com.vaultguard.desktop.service.BridgeCheck
 import com.vaultguard.desktop.service.BridgeInstall
 import com.vaultguard.desktop.service.NativeHost
+import com.vaultguard.desktop.service.ServiceInstall
 import com.vaultguard.desktop.service.runTrayService
 import java.io.File
 import java.util.UUID
@@ -26,6 +27,10 @@ vaultguard --service        run in the system tray
 vaultguard --install-bridge [chrome-extension-id]
                             register the browser native-messaging host
 vaultguard --bridge-check   check the bridge without a browser
+vaultguard --install-service [--at-login]
+                            run the tray service with no console window
+vaultguard --uninstall-service
+                            stop it running at login
 
 File mode opens a backup, or starts a new vault if the file does not exist yet.
 Generate passwords, add entries, and write the file back out. Nothing reaches the
@@ -57,6 +62,8 @@ fun main(args: Array<String>) {
         "--native-host" -> NativeHost.run()
         "--install-bridge" -> installBridge(args.getOrNull(1))
         "--bridge-check" -> bridgeCheck()
+        "--install-service" -> installService(args.getOrNull(1) == "--at-login")
+        "--uninstall-service" -> report(ServiceInstall.uninstall())
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
         "--cloud-signout" -> cloudSignOut()
@@ -83,6 +90,23 @@ private fun cloudSetup() {
     }
     println()
     println(DesktopConfig.template)
+}
+
+private fun report(report: ServiceInstall.Report) {
+    if (!report.succeeded) {
+        report.problems.forEach { System.err.println(it) }
+        return
+    }
+    report.lines.forEach { println(it) }
+}
+
+private fun installService(atLogin: Boolean) {
+    report(ServiceInstall.install(atLogin))
+    if (atLogin) {
+        println()
+        println("Starts next time you log in. To start it now without logging out, run")
+        println("the launcher above - double-clicking it works.")
+    }
 }
 
 /**

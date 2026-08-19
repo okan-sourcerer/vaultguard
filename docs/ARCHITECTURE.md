@@ -125,6 +125,33 @@ corrections and users, and this codebase has been bitten by clock comparisons be
 `VaultService` holds all the state and makes all the decisions; `TrayApp` only draws. That
 split is not tidiness — see below.
 
+### Search and the clipboard
+
+`Search...` on the tray menu finds a credential by name, username or URL and copies a field.
+
+Free-text search lives **here and not in the browser extension**, deliberately. The
+extension's `match` is bound to the tab's host, and that binding is what stops a compromised
+extension from enumerating the vault; adding a search action to the bridge would spend that
+property permanently. The tray already holds the vault and is unreachable from a page, so
+the same capability costs nothing on this side.
+
+The window never renders a password — it goes from the vault to the clipboard without
+passing through a widget, because a Swing component keeps its own copy of what it displays.
+
+`ClipboardGuard` takes the secret back after 30 seconds, **but only if the clipboard still
+holds it**. Between the copy and the timeout the user may have copied something else, and a
+password manager that wipes that is one people switch off (#31, #46 taught this on Android).
+What it cannot do is reach Windows clipboard history: the honest claim is "removed from the
+clipboard", not "unrecoverable".
+
+### Running at login
+
+`--install-service` writes a VBScript launcher that starts the JVM through `javaw.exe`
+rather than Gradle's start script. Two different annoyances: `java.exe` attaches a console
+and holds it open, and a `.bat` in the Startup folder flashes one even when what it launches
+has none. `--install-service --at-login` copies the launcher into the Startup folder;
+`--uninstall-service` removes it.
+
 ### Where the tray will and will not appear
 
 `java.awt.SystemTray` speaks the XEmbed system-tray protocol.

@@ -28,11 +28,15 @@ import javax.swing.SwingUtilities
  */
 class TrayApp(
     private val service: VaultService,
-    private val bridge: BridgeServer = BridgeServer(service)
+    private val bridge: BridgeServer = BridgeServer(service),
+    private val clipboard: ClipboardGuard = ClipboardGuard()
 ) {
+
+    private val search = SearchDialog({ service.credentials() }, clipboard)
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")
+    private val searchItem = MenuItem("Search...")
     private val unlockItem = MenuItem("Unlock...")
     private val refreshItem = MenuItem("Refresh")
     private val lockItem = MenuItem("Lock")
@@ -59,6 +63,8 @@ class TrayApp(
             statusItem.isEnabled = false
             add(statusItem)
             addSeparator()
+            add(searchItem)
+            addSeparator()
             add(unlockItem)
             add(refreshItem)
             add(lockItem)
@@ -71,6 +77,7 @@ class TrayApp(
             isImageAutoSize = true
         }
 
+        searchItem.addActionListener { openSearch() }
         unlockItem.addActionListener { worker.submit { unlock() } }
         refreshItem.addActionListener { worker.submit { refresh() } }
         lockItem.addActionListener { worker.submit { lockNow() } }
@@ -91,6 +98,16 @@ class TrayApp(
 
         notify("VaultGuard is running", "Right-click the tray icon to unlock.")
         return true
+    }
+
+    private fun openSearch() {
+        if (service.state != ServiceState.UNLOCKED) {
+            SwingUtilities.invokeLater { error("Unlock the vault first.") }
+            return
+        }
+        // credentials() counts as use, so a search keeps the auto-lock at bay while the
+        // window is being driven.
+        search.show()
     }
 
     private fun tick() {
@@ -132,6 +149,9 @@ class TrayApp(
 
     private fun quit() {
         service.lock()
+        // Takes back anything still on the clipboard from this session, unless the user has
+        // copied something else since.
+        clipboard.shutdown()
         bridge.stop()
         runCatching { SystemTray.getSystemTray().remove(trayIcon) }
         worker.shutdownNow()
@@ -156,6 +176,7 @@ class TrayApp(
 
         unlockItem.label = if (state == ServiceState.SIGNED_OUT) "Sign in..." else "Unlock..."
         unlockItem.isEnabled = state != ServiceState.UNLOCKED
+        searchItem.isEnabled = state == ServiceState.UNLOCKED
         refreshItem.isEnabled = state == ServiceState.UNLOCKED
         lockItem.isEnabled = state == ServiceState.UNLOCKED
         signOutItem.isEnabled = state != ServiceState.SIGNED_OUT
