@@ -98,15 +98,17 @@ private fun report(report: ServiceInstall.Report) {
         return
     }
     report.lines.forEach { println(it) }
+
+    if (report.commands.isNotEmpty()) {
+        println()
+        println("Run this yourself - it changes what happens when you log in:")
+        println()
+        report.commands.forEach { println(it) }
+    }
 }
 
 private fun installService(atLogin: Boolean) {
     report(ServiceInstall.install(atLogin))
-    if (atLogin) {
-        println()
-        println("Starts next time you log in. To start it now without logging out, run")
-        println("the launcher above - double-clicking it works.")
-    }
 }
 
 /**

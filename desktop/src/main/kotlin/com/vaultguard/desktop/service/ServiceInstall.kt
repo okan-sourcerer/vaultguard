@@ -5,15 +5,19 @@ import java.io.File
 /**
  * Makes the tray service start at login, without a terminal.
  *
- * Two separate annoyances, two separate fixes:
+ * **The console window.** Gradle's start script runs `java.exe`, which attaches a console
+ * and holds it open for the life of the process. `javaw.exe` is the same JVM without one,
+ * so the launcher invokes it directly.
  *
- * - **The console window.** Gradle's start script runs `java.exe`, which attaches a console
- *   and holds it open for the life of the process. `javaw.exe` is the same JVM without one.
- *   The launcher written here calls `javaw` directly rather than going through the script,
- *   which also sidesteps `cmd` entirely.
- * - **Having to start it.** A file in the user's Startup folder runs at login. A `.vbs`
- *   rather than a `.bat`, because a batch file flashes a console for a moment even when
- *   what it launches has none.
+ * **Starting it at login.** Through the `HKCU\...\CurrentVersion\Run` key, which runs the
+ * `javaw` command line directly — no interpreter, no console, not even briefly.
+ *
+ * This used to write a `.vbs` into the Startup folder, which is the usual advice and is
+ * wrong on a hardened machine: Windows Script Host is disabled by policy on plenty of them
+ * (`HKLM\Software\Microsoft\Windows Script Host\Settings\Enabled = 0`), and the script
+ * then fails with "Windows Script Host access is disabled on this device". Nothing here
+ * depends on WSH any more. Disabling it is a reasonable hardening measure and re-enabling it
+ * to launch a password manager would be a poor trade.
  */
 object ServiceInstall {
 
@@ -29,11 +33,19 @@ object ServiceInstall {
             "Microsoft/Windows/Start Menu/Programs/Startup"
         )
 
-    val launcherFile: File get() = File(home, ".vaultguard/vaultguard-service.vbs")
+    val launcherFile: File get() = File(home, ".vaultguard/vaultguard-service.cmd")
 
-    private val startupShortcut: File get() = File(startupDirectory, "VaultGuard.vbs")
+    /** Where a .vbs from an older install may still be sitting. */
+    private val legacyStartupScript: File get() = File(startupDirectory, "VaultGuard.vbs")
 
-    data class Report(val lines: List<String>, val problems: List<String> = emptyList()) {
+    private const val RUN_KEY = """HKCU\Software\Microsoft\Windows\CurrentVersion\Run"""
+    private const val RUN_VALUE = "VaultGuard"
+
+    data class Report(
+        val lines: List<String>,
+        val commands: List<String> = emptyList(),
+        val problems: List<String> = emptyList()
+    ) {
         val succeeded: Boolean get() = problems.isEmpty()
     }
 
@@ -41,7 +53,7 @@ object ServiceInstall {
         if (!isWindows) {
             return Report(
                 emptyList(),
-                listOf(
+                problems = listOf(
                     "Automatic startup is only wired up for Windows so far.",
                     "On Linux or macOS, run `vaultguard --service` from your session's",
                     "autostart (a .desktop file, or a LaunchAgent)."
@@ -52,7 +64,7 @@ object ServiceInstall {
         val appHome = locateAppHome()
             ?: return Report(
                 emptyList(),
-                listOf(
+                problems = listOf(
                     "Could not find the installed application.",
                     "Run `gradlew :desktop:installDist`, then run this from",
                     "desktop/build/install/vaultguard/bin/vaultguard."
@@ -60,32 +72,50 @@ object ServiceInstall {
             )
 
         val javaw = locateJavaw()
-            ?: return Report(emptyList(), listOf("Could not find javaw.exe next to the running JVM."))
+            ?: return Report(emptyList(), problems = listOf("Could not find javaw.exe next to the running JVM."))
 
-        writeLauncher(javaw, appHome)
-        val lines = mutableListOf("Launcher: ${launcherFile.path}")
+        val command = serviceCommand(javaw, appHome)
+        writeLauncher(command)
+
+        val lines = mutableListOf(
+            "Launcher: ${launcherFile.path}",
+            "  Double-click it to start the service now, with no window left behind."
+        )
+        val commands = mutableListOf<String>()
 
         if (atLogin) {
-            startupDirectory.mkdirs()
-            launcherFile.copyTo(startupShortcut, overwrite = true)
-            lines += "Runs at login: ${startupShortcut.path}"
-            lines += "Remove that file to stop it, or run --uninstall-service."
+            // Printed rather than run: this is a persistent change to what happens when the
+            // user logs in, and it is theirs to make knowingly. Same reasoning as the
+            // native-messaging registration.
+            commands += "  reg add \"$RUN_KEY\" /v $RUN_VALUE /t REG_SZ /d \"${escapeForCommandLine(command)}\" /f"
+            lines += "Run the command below to start it at every login."
         } else {
-            lines += "Not set to run at login. Add --at-login to do that."
+            lines += "Not set to run at login. Add --at-login for the command that does that."
         }
 
-        return Report(lines)
+        // An artefact of this same command from before it stopped using Windows Script
+        // Host. It cannot work, and it is ours, so it goes rather than being warned about.
+        if (legacyStartupScript.exists() && legacyStartupScript.delete()) {
+            lines += "Removed ${legacyStartupScript.name} from your Startup folder - it needed"
+            lines += "  Windows Script Host, which is disabled on this machine."
+        }
+
+        return Report(lines, commands)
     }
 
     fun uninstall(): Report {
-        val removed = startupShortcut.exists() && startupShortcut.delete()
+        val lines = mutableListOf<String>()
+
+        if (legacyStartupScript.exists() && legacyStartupScript.delete()) {
+            lines += "Removed ${legacyStartupScript.path}"
+        }
+
+        lines += "The launcher at ${launcherFile.path} is left in place; it is harmless."
+        lines += "A service already running is not stopped - use Quit on the tray icon."
+
         return Report(
-            listOf(
-                if (removed) "Removed ${startupShortcut.path}"
-                else "Nothing at ${startupShortcut.path}",
-                "The launcher at ${launcherFile.path} is left in place; it is harmless.",
-                "A service already running is not stopped - use Quit on the tray icon."
-            )
+            lines,
+            commands = listOf("  reg delete \"$RUN_KEY\" /v $RUN_VALUE /f")
         )
     }
 
@@ -103,21 +133,37 @@ object ServiceInstall {
     }
 
     /**
-     * A one-line VBScript that starts the JVM with no window at all.
+     * Quotes a command so it survives being the `/d` argument of `reg add`.
      *
-     * `0` is the window style — hidden — and `False` means do not wait for it to exit, so
-     * the script ends immediately and leaves the service running.
+     * The value is itself a quoted command line, so its quotes have to reach the registry
+     * rather than terminating the argument. `cmd` reads a backslash-escaped quote as a
+     * literal one. Without this the value is truncated at the first space in
+     * `C:\Program Files\...` and the entry silently launches nothing.
      */
-    private fun writeLauncher(javaw: File, appHome: File) {
-        val classpath = File(appHome, "lib").absolutePath + File.separator + "*"
-        val command = "\"\"${javaw.absolutePath}\"\" -cp \"\"$classpath\"\" " +
-            "com.vaultguard.desktop.MainKt --service"
+    private fun escapeForCommandLine(value: String): String = value.replace("\"", "\\\"")
 
+    /**
+     * The command line that starts the service, used both by the launcher and the Run key.
+     *
+     * `javaw.exe` rather than `java.exe`: same JVM, no console attached.
+     */
+    private fun serviceCommand(javaw: File, appHome: File): String {
+        val classpath = File(appHome, "lib").absolutePath + File.separator + "*"
+        return "\"${javaw.absolutePath}\" -cp \"$classpath\" com.vaultguard.desktop.MainKt --service"
+    }
+
+    /**
+     * A `.cmd` for starting it by hand.
+     *
+     * `start ""` hands the JVM off and lets the shell exit immediately, so the console this
+     * opens closes again at once rather than living as long as the service. At login the Run
+     * key is used instead and no console appears at all.
+     */
+    private fun writeLauncher(command: String) {
         val script = listOf(
-            "' VaultGuard - starts the tray service with no console window.",
-            "' Written by `vaultguard --install-service`; safe to delete.",
-            "Set shell = CreateObject(\"WScript.Shell\")",
-            "shell.Run \"$command\", 0, False",
+            "@echo off",
+            "rem VaultGuard - starts the tray service. Written by `vaultguard --install-service`.",
+            "start \"\" $command",
             ""
         ).joinToString("\r\n")
 
