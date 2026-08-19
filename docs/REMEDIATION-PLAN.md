@@ -460,6 +460,45 @@ all, dismissals that silenced every website at once, a clipboard that never clea
 each case the cause was a platform rule invisible in the source — background activity
 launches, a null return where an exception would have been noticed, process freezing.
 
+## After the review: a second client
+
+The work above was all one codebase on one device. What followed was a desktop client and a
+browser extension, and the reason it belongs in this document is that building it found a
+defect nothing else could have.
+
+**The order it went in, and why:**
+
+1. **`:core` extracted from `:app`.** Key derivation, AES-GCM, the payload codec, the backup
+   format, the generator, the merge rules. Package names unchanged, so it was a file move
+   rather than a refactor. The point was not tidiness: a frozen Argon2id configuration and a
+   UTF-16BE password encoding are only safe while exactly one implementation exists, and the
+   golden vector guards that one.
+2. **A CLI over the backup file.** The cheapest possible proof that `:core` ports off
+   Android, and it exercises the whole pipeline without a network.
+3. **Read-only over Firestore.** Sign in, fetch `vaults/{uid}`, unwrap the vault key,
+   decrypt. Read-only on purpose: the entire chain gets exercised against a live vault
+   without being able to damage one.
+4. **Writes**, then edit and delete, each conditional on the document version that was read.
+5. **A tray service**, which forced auto-lock to be answered rather than deferred.
+6. **The extension**, and the bridge it talks to.
+
+**Finding #64 is the whole argument for step 3.** A vault config published before the
+vault-key conversion never had its wrapped key republished, because `fullSync` published the
+config only when the cloud held none. The salt matched, so every later sync took neither
+branch and republished nothing. A second device could verify the master password and reach
+nothing at all.
+
+It was invisible to 350-odd passing tests and to the phone, which reads its own local copy
+and never takes the path a second client takes. The desktop reader found it on its first
+run — and found it *as an error* rather than as an empty vault, because the client refuses a
+config with no wrapped key rather than showing nothing. That refusal exists because of
+finding #4, written months earlier.
+
+**What the second client did not need:** any change to the crypto, the payload format, the
+backup format, or the merge rules. All of it ported unchanged. The one thing that had to
+move was `CredentialMatcher`, from `:app` to `:core`, so the extension could not end up with
+a third implementation of the decision that findings #10 and #11 were both about.
+
 Three habits from this work worth keeping:
 
 - **Write the failing test first where the logic is pure.** It caught a wrong backfill, an
@@ -469,3 +508,7 @@ Three habits from this work worth keeping:
   had just built, and deleted more than it added.
 - **Verify on the device before believing it.** Twice, a fix that compiled, passed, and
   read correctly did nothing at all when run.
+- **A second implementation finds what a second look cannot.** #64 sat in a live sync path
+  through a 53-defect review and 350 passing tests. What found it was building the client
+  that takes the other path — and the guard that caught it was written for a different
+  finding entirely. Neither more tests nor more reading would have got there.

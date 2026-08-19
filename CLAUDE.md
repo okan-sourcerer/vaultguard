@@ -158,7 +158,9 @@ says so rather than pretending). `--help` lists the modes.
 ```
 
 `jpackage` — already in the JDK — for a `VaultGuard.exe` Windows can name and draw. Without
-it the tray service is `javaw.exe` with a coffee cup in Task Manager.
+it the tray service is `javaw.exe` with a coffee cup in Task Manager. The image lands under
+`build/`, which `clean` removes, so `--install-service --to <dir>` copies it somewhere
+stable first; a Run key pointing into a deleted build fails silently at the next login.
 
 ```bash
 ./gradlew syncExtension packageExtensions

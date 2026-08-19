@@ -126,6 +126,18 @@ It lands in `build/extension/vaultguard-firefox.zip`.
 as long as Developer mode is on, so it is the quicker path for checking that the whole chain
 works.
 
+## Releasing a new version
+
+AMO refuses a repeat upload of a version it has already signed, and the two manifests are
+separate files, so both have to move together:
+
+```
+gradlew packageExtensions
+```
+
+fails if they disagree. Bump `version` in `extension/chrome/manifest.json` and
+`extension/firefox/manifest.json`, then rebuild and re-upload the Firefox zip.
+
 ## Editing
 
 `extension/shared` is the source. The two browser directories hold a manifest plus copies.

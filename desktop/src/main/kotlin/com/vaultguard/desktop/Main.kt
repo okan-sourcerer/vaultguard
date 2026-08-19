@@ -28,8 +28,9 @@ vaultguard --service        run in the system tray
 vaultguard --install-bridge [chrome-extension-id]
                             register the browser native-messaging host
 vaultguard --bridge-check   check the bridge without a browser
-vaultguard --install-service [--at-login]
-                            run the tray service with no console window
+vaultguard --install-service [--at-login] [--to <dir>]
+                            run the tray service with no console window;
+                            --to copies the app somewhere `clean` will not reach
 vaultguard --uninstall-service
                             stop it running at login
 
@@ -70,7 +71,7 @@ fun main(args: Array<String>) {
         }
         "--install-bridge" -> installBridge(args.getOrNull(1))
         "--bridge-check" -> bridgeCheck()
-        "--install-service" -> installService(args.getOrNull(1) == "--at-login")
+        "--install-service" -> installService(args)
         "--uninstall-service" -> report(ServiceInstall.uninstall())
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
@@ -115,8 +116,18 @@ private fun report(report: ServiceInstall.Report) {
     }
 }
 
-private fun installService(atLogin: Boolean) {
-    report(ServiceInstall.install(atLogin))
+private fun installService(args: Array<String>) {
+    val atLogin = args.contains("--at-login")
+    val destination = args.indexOf("--to")
+        .takeIf { it >= 0 }
+        ?.let { args.getOrNull(it + 1) }
+
+    if (args.contains("--to") && destination == null) {
+        System.err.println("--to needs a directory.")
+        return
+    }
+
+    report(ServiceInstall.install(atLogin, destination?.let { File(it) }))
 }
 
 /**

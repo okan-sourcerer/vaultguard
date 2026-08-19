@@ -57,8 +57,33 @@ listOf("chrome", "firefox").forEach { browser ->
     }
 }
 
+/**
+ * The two manifests are separate files and their versions have to move together: AMO
+ * refuses a repeat upload of a version it has already signed, so a Firefox manifest left
+ * behind is found only after a round trip through submission.
+ */
+val checkExtensionVersions by tasks.registering {
+    description = "Fails if the browser manifests disagree about the version."
+
+    doLast {
+        val versions = listOf("chrome", "firefox").associateWith { browser ->
+            val manifest = file("extension/$browser/manifest.json").readText()
+            Regex(""""version"\s*:\s*"([^"]+)"""").find(manifest)?.groupValues?.get(1)
+                ?: throw GradleException("No version in the $browser manifest.")
+        }
+
+        if (versions.values.distinct().size != 1) {
+            throw GradleException(
+                "The extension manifests disagree about the version: $versions. " +
+                    "Bump both, or AMO will reject the upload as a duplicate."
+            )
+        }
+        logger.lifecycle("Extension version ${versions.values.first()}")
+    }
+}
+
 tasks.register("packageExtensions") {
-    dependsOn("packageChromeExtension", "packageFirefoxExtension")
+    dependsOn(checkExtensionVersions, "packageChromeExtension", "packageFirefoxExtension")
     description = "Zips both browser extensions."
     group = "build"
 }

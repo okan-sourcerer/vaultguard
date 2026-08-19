@@ -49,7 +49,7 @@ object ServiceInstall {
         val succeeded: Boolean get() = problems.isEmpty()
     }
 
-    fun install(atLogin: Boolean): Report {
+    fun install(atLogin: Boolean, installTo: File? = null): Report {
         if (!isWindows) {
             return Report(
                 emptyList(),
@@ -71,7 +71,33 @@ object ServiceInstall {
                 )
             )
 
-        val native = locateNativeLauncher(appHome)
+        var native = locateNativeLauncher(appHome)
+
+        // The jpackage image lives under build/, which `gradlew clean` removes -- leaving a
+        // Run key pointing at nothing, discovered at the next login. Copying it somewhere
+        // stable is the fix, and it has to happen before the command line is built.
+        if (installTo != null) {
+            if (native == null) {
+                return Report(
+                    emptyList(),
+                    problems = listOf(
+                        "There is no native image to copy.",
+                        "Run `gradlew :desktop:packageApp` first."
+                    )
+                )
+            }
+
+            val destination = File(installTo, "VaultGuard")
+            val copied = copyImage(native.parentFile, destination)
+                ?: return Report(
+                    emptyList(),
+                    problems = listOf(
+                        "Could not copy the image to ${destination.path}.",
+                        "If VaultGuard is running from there, quit it from the tray first."
+                    )
+                )
+            native = copied
+        }
         val command = if (native != null) {
             "\"${native.absolutePath}\""
         } else {
@@ -152,6 +178,26 @@ object ServiceInstall {
         // .../desktop/build/install/vaultguard -> .../desktop/build/native/VaultGuard
         val buildDir = appHome.parentFile?.parentFile ?: return null
         return File(buildDir, "native/VaultGuard/VaultGuard.exe").takeIf { it.exists() }
+    }
+
+    /**
+     * Copies the whole app image, not just the executable.
+     *
+     * jpackage produces a launcher, an `app` directory and a bundled runtime, and the
+     * launcher finds the other two by their position beside it. Copying the `.exe` alone
+     * produces something that looks installed and cannot start.
+     *
+     * @return the copied launcher, or null if the copy failed.
+     */
+    private fun copyImage(source: File, destination: File): File? = try {
+        if (destination.exists() && !destination.deleteRecursively()) {
+            null
+        } else {
+            source.copyRecursively(destination, overwrite = true)
+            File(destination, "VaultGuard.exe").takeIf { it.exists() }
+        }
+    } catch (e: Exception) {
+        null
     }
 
     private fun locateJavaw(): File? {
