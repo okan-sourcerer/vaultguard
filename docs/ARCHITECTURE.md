@@ -127,7 +127,23 @@ split is not tidiness — see below.
 
 ### Search and the clipboard
 
-`Search...` on the tray menu finds a credential by name, username or URL and copies a field.
+`Search...` on the tray menu finds a credential by name, username or URL, copies a field,
+and creates, edits or soft-deletes an entry — the same operations `--cloud` has, driven from
+a window rather than a prompt.
+
+Writes go through `VaultService`, not from the dialog: it owns the `updateTime` precondition
+that makes an edit refuse rather than overwrite, and the refresh that follows. That refresh
+is not only for the display — a newly created row has no `updateTime` until it has been read
+back, and without one it could not then be edited.
+
+`From window...` lists the applications currently open and filters by the one picked. The
+user chooses; nothing watches. An earlier sketch had the service notice launches and offer
+credentials unprompted, which means a resident process keeping a record of what you run, for
+a feature that works as well on request. The process name is what seeds the search — a
+window title is whatever the application felt like (`Inbox (14) - okan@example.com - Mozilla
+Thunderbird`) and matches nothing, while the process name is short, stable and usually what
+the entry is named after. Windows-only so far, through PowerShell rather than a native
+binding, because it runs on a button press rather than in a loop.
 
 Free-text search lives **here and not in the browser extension**, deliberately. The
 extension's `match` is bound to the tab's host, and that binding is what stops a compromised

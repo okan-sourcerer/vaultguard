@@ -28,7 +28,7 @@ class TrayApp(
     private val clipboard: ClipboardGuard = ClipboardGuard()
 ) {
 
-    private val search = SearchDialog({ service.credentials() }, clipboard)
+    private val search = SearchDialog(service, clipboard)
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")

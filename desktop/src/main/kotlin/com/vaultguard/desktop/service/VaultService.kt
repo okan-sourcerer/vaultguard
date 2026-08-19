@@ -5,6 +5,7 @@ import com.vaultguard.app.domain.repository.VaultSnapshot
 import com.vaultguard.desktop.cloud.CloudConnect
 import com.vaultguard.desktop.cloud.DesktopConfig
 import com.vaultguard.desktop.cloud.OpenVault
+import com.vaultguard.desktop.cloud.RemoteCredentialRow
 import com.vaultguard.desktop.cloud.RemoteVaultCodec
 import com.vaultguard.desktop.cloud.SavedSession
 import java.util.concurrent.TimeUnit
@@ -73,6 +74,15 @@ class VaultService(
 ) {
     private var open: OpenVault? = null
     private var snapshot: VaultSnapshot<Credential> = VaultSnapshot(emptyList())
+
+    /**
+     * The rows behind [snapshot], by id, kept for their `updateTime`.
+     *
+     * An edit or a delete is conditional on the version that was read, and that value only
+     * exists on the row as fetched. An entry created in this session is absent here until
+     * the refresh that follows the write puts it back.
+     */
+    private var rowsById: Map<String, RemoteCredentialRow> = emptyMap()
     private var lastUsedAt: Long = clock()
 
     /** Fired whenever the state changes, so a UI can redraw without polling. */
@@ -136,6 +146,7 @@ class VaultService(
         return try {
             val rows = opened.client.credentialDocuments()
                 .mapNotNull { RemoteVaultCodec.readCredentialRow(it) }
+            rowsById = rows.associateBy { it.id }
             snapshot = opened.vault.decrypt(rows, opened.vaultKey)
             touch()
 
@@ -164,6 +175,7 @@ class VaultService(
         open?.vault?.lock()
         open = null
         snapshot = VaultSnapshot(emptyList())
+        rowsById = emptyMap()
         onStateChanged(state)
     }
 
@@ -177,6 +189,58 @@ class VaultService(
     fun signOut() {
         SavedSession.clear(sessionFile)
         lock()
+    }
+
+    /** What a write did, in a form a dialog can put in a status line. */
+    data class WriteOutcome(val ok: Boolean, val message: String)
+
+    /**
+     * Creates a credential.
+     *
+     * The refresh afterwards is not just for the display: a created row has no `updateTime`
+     * until it has been read back, and without one it could not then be edited.
+     */
+    fun create(credential: Credential): WriteOutcome = write("Saved") { opened ->
+        opened.client.createCredential(opened.vault.encrypt(credential, opened.vaultKey))
+    }
+
+    /** Replaces a credential, refusing if the phone has written to it since the last fetch. */
+    fun update(credential: Credential): WriteOutcome {
+        val row = rowsById[credential.id]
+        if (row?.updateTime == null) {
+            return WriteOutcome(false, "That entry has not been read back yet - refresh first.")
+        }
+        return write("Saved") { opened ->
+            opened.client.updateCredential(
+                opened.vault.encrypt(credential, opened.vaultKey).copy(updateTime = row.updateTime)
+            )
+        }
+    }
+
+    /** Soft-deletes a credential: the same tombstone the phone writes, undoable there. */
+    fun delete(id: String): WriteOutcome {
+        val row = rowsById[id]
+        if (row?.updateTime == null) {
+            return WriteOutcome(false, "That entry has not been read back yet - refresh first.")
+        }
+        return write("Deleted") { opened ->
+            opened.client.tombstoneCredential(row, System.currentTimeMillis())
+        }
+    }
+
+    private fun write(success: String, action: (OpenVault) -> Unit): WriteOutcome {
+        val opened = open ?: return WriteOutcome(false, "The vault is locked.")
+        touch()
+
+        return try {
+            action(opened)
+            // Re-read rather than patching the local copy: it is one round trip, and it is
+            // what gives a new row the updateTime that later edits are conditional on.
+            refresh { }
+            WriteOutcome(true, success)
+        } catch (e: Exception) {
+            WriteOutcome(false, e.message ?: "The write failed.")
+        }
     }
 
     /**

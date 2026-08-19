@@ -34,6 +34,14 @@ exists, not what it is.
 The URL matched against is read from the tab by the background worker, never accepted from
 the content script — a page cannot claim to be a site it is not on.
 
+## What the tray can do that this cannot
+
+Free-text search, and creating, editing or deleting an entry, all live in the tray service's
+`Search...` window rather than here — deliberately. This extension's `match` is bound to the
+tab's host, and that binding is what stops a compromised extension from enumerating the
+vault. A search action on the bridge would spend that property permanently, so the same
+capability lives on the side a web page cannot reach.
+
 ## Installing
 
 1. Build and start the service:

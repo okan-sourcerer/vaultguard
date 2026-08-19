@@ -11,10 +11,14 @@ optional Firestore sync). Three modules:
   backup format, the generator, the merge rules. No Android anywhere in it, so a desktop
   client links the same classes rather than reimplementing them.
 - **`:app`** — everything Android: UI, Room, autofill, Keystore, Firebase.
-- **`:desktop`** — a JVM CLI with two modes: read/write over a v2 backup file, and
-  browse-and-add over the Firestore vault the phone publishes. It cannot edit or delete a
-  cloud entry, so it never reaches the two-writer conflict rules. No Keystore, no local
-  database, no persisted state of its own beyond an OAuth config file.
+- **`:desktop`** — a JVM client for the same vault, in three shapes: a CLI over a v2 backup
+  file, a CLI over the Firestore vault the phone publishes, and a tray service that holds the
+  vault open for a browser extension. Full read/write against the cloud vault. No Keystore
+  and no local database; the only thing it persists is a Firebase refresh token, sealed
+  under the master key.
+
+Plus `extension/` — a WebExtension for Chrome and Firefox that fills from the tray service
+over native messaging. It holds no key and decrypts nothing.
 
 `:core` and `:app` share the package namespace (`com.vaultguard.app.*`) because the split
 between them is by platform dependency, not by name; `:desktop` is new code and lives in
@@ -145,9 +149,23 @@ what a method signature says, assume it needs exercising on a device before it i
 ./gradlew :desktop:installDist
 ```
 
-That last one produces `desktop/build/install/vaultguard/bin/vaultguard <backup-file>`.
-Run it from a real terminal — without a console the JVM cannot suppress echo, so the
-backup password is typed in the clear (the CLI says so rather than pretending).
+Produces `desktop/build/install/vaultguard/bin/vaultguard`. Run it from a real terminal —
+without a console the JVM cannot suppress echo, so a password is typed in the clear (the CLI
+says so rather than pretending). `--help` lists the modes.
+
+```bash
+./gradlew :desktop:packageApp
+```
+
+`jpackage` — already in the JDK — for a `VaultGuard.exe` Windows can name and draw. Without
+it the tray service is `javaw.exe` with a coffee cup in Task Manager.
+
+```bash
+./gradlew syncExtension packageExtensions
+```
+
+`extension/shared` is the source; the per-browser directories are copies plus a manifest.
+Run `syncExtension` after editing anything shared. See [extension/README.md](extension/README.md).
 
 The release build is minified and debug-signed so it can be installed locally — the same
 certificate as debug, so it upgrades in place and keeps the vault. Replace the signing
@@ -161,6 +179,17 @@ fall into this category.
 
 **Never uninstall to fix a failed install.** The Keystore key and encrypted preferences go
 with it, and the vault becomes unrecoverable. Check the signing certificate instead.
+
+## The desktop client, in one paragraph
+
+`--cloud` and `--service` both reach the vault through `CloudConnect`: derive the master key
+against a locally stored salt, open the saved Firebase refresh token with it, refresh the
+session, fetch `vaults/{uid}`, check the salt still matches, unwrap the vault key. One
+Argon2id run serves the token and the vault. Writes are conditional on the document version
+that was read, so a race with the phone is refused rather than merged — `SyncMerge`'s
+conflict rules still have exactly one caller, on the phone. The tray holds the unlocked
+vault for the browser extension and drops it after fifteen minutes idle, measured on a
+monotonic clock from the last *use* of the vault rather than from any user input.
 
 ## Testing notes
 

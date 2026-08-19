@@ -16,6 +16,7 @@ import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JScrollPane
+import javax.swing.JOptionPane
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
 import javax.swing.SwingUtilities
@@ -34,9 +35,11 @@ import javax.swing.SwingUtilities
  * its own copy of whatever it displays and there is no reliable way to take that back.
  */
 class SearchDialog(
-    private val credentials: () -> List<Credential>,
+    private val service: VaultService,
     private val clipboard: ClipboardGuard
 ) {
+    private val credentials: () -> List<Credential> = { service.credentials() }
+    private val editor = CredentialDialog(service) { SwingUtilities.invokeLater { refill(query.text) } }
     private val dialog = JDialog(null as java.awt.Frame?, "VaultGuard", false)
     private val query = JTextField()
     private val model = DefaultListModel<Row>()
@@ -85,6 +88,25 @@ class SearchDialog(
         val copyUsername = JButton("Copy username").apply { addActionListener { copy(password = false) } }
         val close = JButton("Close").apply { addActionListener { close() } }
 
+        val add = JButton("New").apply { addActionListener { editor.createNew(dialog) } }
+        val edit = JButton("Edit").apply {
+            addActionListener {
+                val row = list.selectedValue ?: return@addActionListener run { status.text = "Nothing selected" }
+                editor.edit(dialog, row.credential)
+            }
+        }
+        val remove = JButton("Delete").apply { addActionListener { delete() } }
+
+        val fromWindow = JButton("From window...").apply {
+            isEnabled = WindowList.isSupported
+            toolTipText = if (WindowList.isSupported) {
+                "Filter by an application you have open"
+            } else {
+                "Only available on Windows so far"
+            }
+            addActionListener { pickWindow() }
+        }
+
         // Enter on the list copies the password, which is what anyone reaching for this
         // wants nine times in ten.
         list.addKeyListener(object : KeyAdapter() {
@@ -102,10 +124,18 @@ class SearchDialog(
             add(close)
         }
 
+        val manage = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+            add(fromWindow)
+            add(add)
+            add(edit)
+            add(remove)
+        }
+
         val top = JPanel(BorderLayout(0, 6)).apply {
             border = BorderFactory.createEmptyBorder(10, 10, 4, 10)
             add(JLabel("Search"), BorderLayout.NORTH)
             add(query, BorderLayout.CENTER)
+            add(manage, BorderLayout.SOUTH)
         }
 
         val bottom = JPanel(BorderLayout()).apply {
@@ -173,6 +203,62 @@ class SearchDialog(
             append(if (password) "Password" else "Username")
             append(" copied - clears in ").append(seconds).append("s")
         }
+    }
+
+    private fun delete() {
+        val row = list.selectedValue ?: run {
+            status.text = "Nothing selected"
+            return
+        }
+
+        // Said plainly, because "delete" reads as final and this one is not.
+        val confirmed = JOptionPane.showConfirmDialog(
+            dialog,
+            "Delete \"${row.credential.displayName}\"?\n\n" +
+                "This marks it deleted and syncs that to the phone, where it can still be undone.",
+            "VaultGuard",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.WARNING_MESSAGE
+        )
+        if (confirmed != JOptionPane.YES_OPTION) return
+
+        val outcome = service.delete(row.credential.id)
+        status.text = outcome.message
+        if (outcome.ok) refill(query.text)
+    }
+
+    /**
+     * Filters by an application the user has open.
+     *
+     * They pick; nothing watches. A service that noticed launches by itself would be keeping
+     * a record of what you run, for a feature that works just as well on request.
+     */
+    private fun pickWindow() {
+        status.text = "Listing windows..."
+
+        // PowerShell takes a moment, and the event thread is drawing this dialog.
+        Thread({
+            val windows = WindowList.list()
+            SwingUtilities.invokeLater {
+                if (windows.isEmpty()) {
+                    status.text = "No windows found"
+                    return@invokeLater
+                }
+
+                val chosen = JOptionPane.showInputDialog(
+                    dialog,
+                    "Filter by which application?",
+                    "VaultGuard",
+                    JOptionPane.PLAIN_MESSAGE,
+                    null,
+                    windows.toTypedArray(),
+                    windows.first()
+                ) as? OpenWindow ?: return@invokeLater
+
+                query.text = chosen.searchTerm
+                refill(chosen.searchTerm)
+            }
+        }, "vaultguard-window-list").apply { isDaemon = true }.start()
     }
 
     private fun close() {
