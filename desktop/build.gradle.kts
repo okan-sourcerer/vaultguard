@@ -71,8 +71,28 @@ val packageApp by tasks.registering(Exec::class) {
     val icon = layout.buildDirectory.file("vaultguard.ico").get().asFile
 
     doFirst {
-        // jpackage refuses to overwrite, and a stale image is worse than none.
-        outputDir.resolve("VaultGuard").deleteRecursively()
+        val image = outputDir.resolve("VaultGuard")
+        val exe = image.resolve("VaultGuard.exe")
+
+        // Windows locks a running executable and the runtime beside it, so the delete below
+        // half-succeeds and jpackage then refuses with "directory already exists" - which
+        // says nothing about the actual cause. Checked first, and named.
+        if (exe.exists() && isRunning(exe)) {
+            throw GradleException(
+                "VaultGuard is running from ${exe.path}, so its files cannot be replaced. " +
+                    "Quit it from the tray icon (right-click -> Quit) and run this again."
+            )
+        }
+
+        // A stale image is worse than none: it would keep launching the old build while
+        // looking like the new one.
+        if (image.exists() && !image.deleteRecursively()) {
+            throw GradleException(
+                "Could not remove ${image.path}. " +
+                    "Something is holding a file in it open - a running VaultGuard, an " +
+                    "antivirus scan, or an Explorer window inside the folder."
+            )
+        }
         outputDir.mkdirs()
     }
 
@@ -92,3 +112,17 @@ val packageApp by tasks.registering(Exec::class) {
         "--dest", outputDir.absolutePath
     )
 }
+
+/**
+ * Whether a process is running from [executable].
+ *
+ * `ProcessHandle` rather than shelling out to `tasklist`: it is in the JDK, it reports the
+ * full command path so a same-named process elsewhere is not mistaken for this one, and it
+ * works the same on every platform. Processes the build cannot inspect report no command and
+ * are treated as not matching, which is the right way to be wrong here — the worst case is
+ * the clearer message below being replaced by jpackage's.
+ */
+fun isRunning(executable: File): Boolean =
+    ProcessHandle.allProcesses().anyMatch { handle ->
+        handle.info().command().map { it.equals(executable.absolutePath, ignoreCase = true) }.orElse(false)
+    }
