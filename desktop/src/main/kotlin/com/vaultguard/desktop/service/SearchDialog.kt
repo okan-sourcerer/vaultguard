@@ -129,6 +129,9 @@ class SearchDialog(
             override fun windowClosing(e: WindowEvent) = forget()
         })
 
+        // Otherwise the window, alt-tab and the taskbar all show the default Java icon.
+        dialog.iconImages = VaultIcon.windowIcons(locked = false)
+
         dialog.minimumSize = Dimension(430, 340)
         dialog.pack()
         dialog.setLocationRelativeTo(null)

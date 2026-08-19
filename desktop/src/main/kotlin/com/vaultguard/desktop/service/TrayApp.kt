@@ -1,14 +1,10 @@
 package com.vaultguard.desktop.service
 
 import com.vaultguard.desktop.cloud.DesktopConfig
-import java.awt.Color
-import java.awt.Graphics2D
 import java.awt.MenuItem
 import java.awt.PopupMenu
-import java.awt.RenderingHints
 import java.awt.SystemTray
 import java.awt.TrayIcon
-import java.awt.image.BufferedImage
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.swing.JOptionPane
@@ -73,7 +69,7 @@ class TrayApp(
             add(MenuItem("Quit").apply { addActionListener { quit() } })
         }
 
-        trayIcon = TrayIcon(icon(locked = true), "VaultGuard", menu).apply {
+        trayIcon = TrayIcon(VaultIcon.image(16, locked = true), "VaultGuard", menu).apply {
             isImageAutoSize = true
         }
 
@@ -181,7 +177,7 @@ class TrayApp(
         lockItem.isEnabled = state == ServiceState.UNLOCKED
         signOutItem.isEnabled = state != ServiceState.SIGNED_OUT
 
-        trayIcon.image = icon(locked = state != ServiceState.UNLOCKED)
+        trayIcon.image = VaultIcon.image(16, locked = state != ServiceState.UNLOCKED)
         trayIcon.toolTip = "VaultGuard - ${statusItem.label}"
     }
 
@@ -223,19 +219,6 @@ class TrayApp(
         return result[0]?.takeIf { it.isNotEmpty() }
     }
 
-    /** Drawn rather than shipped, so there is no image file to lose or to keep in step. */
-    private fun icon(locked: Boolean): BufferedImage {
-        val size = 16
-        return BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB).apply {
-            val g = createGraphics() as Graphics2D
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g.color = if (locked) Color(120, 120, 128) else Color(64, 148, 96)
-            g.fillRoundRect(2, 6, 12, 9, 3, 3)
-            g.stroke = java.awt.BasicStroke(1.6f)
-            g.drawArc(5, 1, 6, 8, 0, 180)
-            g.dispose()
-        }
-    }
 }
 
 /** Entry point for `vaultguard --service`. */

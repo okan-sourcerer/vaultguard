@@ -71,16 +71,29 @@ object ServiceInstall {
                 )
             )
 
-        val javaw = locateJavaw()
-            ?: return Report(emptyList(), problems = listOf("Could not find javaw.exe next to the running JVM."))
+        val native = locateNativeLauncher(appHome)
+        val command = if (native != null) {
+            "\"${native.absolutePath}\""
+        } else {
+            val javaw = locateJavaw()
+                ?: return Report(
+                    emptyList(),
+                    problems = listOf("Could not find javaw.exe next to the running JVM.")
+                )
+            serviceCommand(javaw, appHome)
+        }
 
-        val command = serviceCommand(javaw, appHome)
         writeLauncher(command)
 
-        val lines = mutableListOf(
-            "Launcher: ${launcherFile.path}",
-            "  Double-click it to start the service now, with no window left behind."
-        )
+        val lines = mutableListOf<String>()
+        lines += if (native != null) {
+            "Using the native launcher: ${native.path}"
+        } else {
+            "Using javaw. Run `gradlew :desktop:packageApp` for a launcher Windows can name" +
+                " and draw, then run this again."
+        }
+        lines += "Launcher: ${launcherFile.path}"
+        lines += "  Double-click it to start the service now, with no window left behind."
         val commands = mutableListOf<String>()
 
         if (atLogin) {
@@ -125,6 +138,20 @@ object ServiceInstall {
             File(ServiceInstall::class.java.protectionDomain.codeSource.location.toURI())
         }.getOrNull() ?: return null
         return source.parentFile?.parentFile?.takeIf { File(it, "lib").isDirectory }
+    }
+
+    /**
+     * The jpackage image, if it has been built.
+     *
+     * Preferred over `javaw` because Windows shows a process by its executable: without it
+     * the thing holding the vault open appears in Task Manager as `javaw.exe` with a coffee
+     * cup, indistinguishable from any other JVM. `--arguments --service` is baked into the
+     * image, so the command line is just the path.
+     */
+    private fun locateNativeLauncher(appHome: File): File? {
+        // .../desktop/build/install/vaultguard -> .../desktop/build/native/VaultGuard
+        val buildDir = appHome.parentFile?.parentFile ?: return null
+        return File(buildDir, "native/VaultGuard/VaultGuard.exe").takeIf { it.exists() }
     }
 
     private fun locateJavaw(): File? {

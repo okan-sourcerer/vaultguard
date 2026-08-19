@@ -11,6 +11,7 @@ import com.vaultguard.desktop.service.BridgeCheck
 import com.vaultguard.desktop.service.BridgeInstall
 import com.vaultguard.desktop.service.NativeHost
 import com.vaultguard.desktop.service.ServiceInstall
+import com.vaultguard.desktop.service.VaultIcon
 import com.vaultguard.desktop.service.runTrayService
 import java.io.File
 import java.util.UUID
@@ -60,6 +61,13 @@ fun main(args: Array<String>) {
         // Started by the browser, never by a person. Nothing may be printed to stdout on
         // this path: the stream is a framed protocol and a stray line corrupts it.
         "--native-host" -> NativeHost.run()
+        // Used by the build to produce the launcher's icon from the same drawing the tray
+        // uses. Not listed in the usage text; nobody needs to run this by hand.
+        "--write-icon" -> {
+            val target = File(args.getOrNull(1) ?: "vaultguard.ico")
+            VaultIcon.writeIco(target)
+            println("Wrote ${target.absolutePath}")
+        }
         "--install-bridge" -> installBridge(args.getOrNull(1))
         "--bridge-check" -> bridgeCheck()
         "--install-service" -> installService(args.getOrNull(1) == "--at-login")

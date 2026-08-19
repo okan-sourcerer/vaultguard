@@ -144,6 +144,19 @@ password manager that wipes that is one people switch off (#31, #46 taught this 
 What it cannot do is reach Windows clipboard history: the honest claim is "removed from the
 clipboard", not "unrecoverable".
 
+### The name and the icon
+
+`gradlew :desktop:packageApp` runs `jpackage` — which ships with the JDK, so no new tooling
+— to produce `VaultGuard.exe` with its own name, version and icon. Without it the process
+holding the vault open is `javaw.exe` with a coffee cup beside it in Task Manager,
+indistinguishable from any other JVM on the machine. `--install-service` prefers this
+launcher when it exists and falls back to `javaw` when it does not.
+
+`VaultIcon` draws the padlock, and one drawing serves the tray, the dialog windows and the
+`.ico` the launcher is built with — including writing the `.ico` itself, PNG-per-entry, so
+there is no binary asset in the repository to keep in step. `--write-icon` is the hidden
+entry point the build uses.
+
 ### Running at login
 
 `--install-service` writes a VBScript launcher that starts the JVM through `javaw.exe`
