@@ -127,6 +127,30 @@ After changing anything shared:
 gradlew syncExtension
 ```
 
+## It does not detect login pages
+
+Deliberately, for now. There is no content script, nothing watches the DOM, and no icon
+appears in a password field. You click the extension; it matches on the tab's host and
+offers what it has. Field detection happens only at the moment you pick an entry, inside
+the page, and only then.
+
+That means it cannot tell you a page *has* a login form — but it also means no script of
+this extension's runs on any page you visit until you ask for it. Detection is a worthwhile
+next step; it is not free, and it was not the first thing to build.
+
+## Diagnosing
+
+```
+vaultguard --bridge-check
+```
+
+Talks to the service exactly as the native host does, without a browser involved, and
+reports the handshake, the connection, the lock state and a match count for a known and an
+unknown host. It prints counts, never credential contents.
+
+If that says the service side is working, the remaining problem is native messaging: the
+host registration, or the launcher shim.
+
 ## Known rough edges
 
 - The `.bat` shim the browser executes on Windows is the least certain part: whether cmd

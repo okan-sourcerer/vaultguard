@@ -7,6 +7,7 @@ import com.vaultguard.app.domain.usecase.backup.VaultBackupFormat
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import com.vaultguard.desktop.cloud.DesktopConfig
 import com.vaultguard.desktop.cloud.SavedSession
+import com.vaultguard.desktop.service.BridgeCheck
 import com.vaultguard.desktop.service.BridgeInstall
 import com.vaultguard.desktop.service.NativeHost
 import com.vaultguard.desktop.service.runTrayService
@@ -24,6 +25,7 @@ vaultguard --cloud-signout  forget the saved sign-in
 vaultguard --service        run in the system tray
 vaultguard --install-bridge [chrome-extension-id]
                             register the browser native-messaging host
+vaultguard --bridge-check   check the bridge without a browser
 
 File mode opens a backup, or starts a new vault if the file does not exist yet.
 Generate passwords, add entries, and write the file back out. Nothing reaches the
@@ -54,6 +56,7 @@ fun main(args: Array<String>) {
         // this path: the stream is a framed protocol and a stray line corrupts it.
         "--native-host" -> NativeHost.run()
         "--install-bridge" -> installBridge(args.getOrNull(1))
+        "--bridge-check" -> bridgeCheck()
         "--cloud" -> runCloudSession()
         "--cloud-setup" -> cloudSetup()
         "--cloud-signout" -> cloudSignOut()
@@ -80,6 +83,14 @@ private fun cloudSetup() {
     }
     println()
     println(DesktopConfig.template)
+}
+
+/**
+ * Talks to the running service exactly as the native host does, so a failure can be pinned
+ * to one side or the other rather than guessed at.
+ */
+private fun bridgeCheck() {
+    BridgeCheck.run(::println)
 }
 
 private fun installBridge(chromeExtensionId: String?) {

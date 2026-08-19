@@ -3,6 +3,14 @@
 // Content scripts run in the page's world and are the first thing a hostile page reaches;
 // they are never given a port to the vault. They ask this worker, and this worker decides.
 
+// Firefox loads browser-polyfill.js through the manifest's background.scripts array.
+// Chrome MV3 names a single service worker, so it has to pull it in itself — and a service
+// worker is a classic worker, which is what makes importScripts available here and absent
+// in Firefox's event page.
+if (typeof importScripts === "function") {
+  importScripts("browser-polyfill.js");
+}
+
 const HOST_NAME = "com.vaultguard.bridge";
 
 const api = globalThis.browser || globalThis.chrome;
@@ -14,27 +22,27 @@ const api = globalThis.browser || globalThis.chrome;
  * right shape here: requests are rare and user-driven, and a per-message process means no
  * long-lived pipe to leak. The vault stays unlocked in the tray service regardless.
  */
-function ask(message) {
-  return new Promise((resolve) => {
-    try {
-      api.runtime.sendNativeMessage(HOST_NAME, message, (response) => {
-        const failure = api.runtime.lastError;
-        if (failure) {
-          resolve({
-            ok: false,
-            serviceUnavailable: true,
-            error:
-              "Could not reach VaultGuard. Is the desktop service running, and the " +
-              "native messaging host installed?",
-          });
-          return;
-        }
-        resolve(response || { ok: false, error: "Empty response from VaultGuard." });
-      });
-    } catch (e) {
-      resolve({ ok: false, serviceUnavailable: true, error: String(e) });
-    }
-  });
+const UNREACHABLE = {
+  ok: false,
+  serviceUnavailable: true,
+  error:
+    "Could not reach VaultGuard. Check that `vaultguard --service` is running and " +
+    "that the native messaging host is registered.",
+};
+
+async function ask(message) {
+  try {
+    const response = await vgInvoke((done) =>
+      api.runtime.sendNativeMessage(HOST_NAME, message, done)
+    );
+
+    // Chrome reports a failed host through lastError with an undefined response rather
+    // than by rejecting. Firefox rejects, which lands in the catch below.
+    if (api.runtime.lastError || !response) return UNREACHABLE;
+    return response;
+  } catch (e) {
+    return { ...UNREACHABLE, detail: String(e && e.message ? e.message : e) };
+  }
 }
 
 api.runtime.onMessage.addListener((message, sender, sendResponse) => {

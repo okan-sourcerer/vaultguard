@@ -5,7 +5,7 @@ const entriesEl = document.getElementById("entries");
 const lockButton = document.getElementById("lock");
 
 const send = (message) =>
-  new Promise((resolve) => api.runtime.sendMessage(message, resolve));
+  vgInvoke((done) => api.runtime.sendMessage(message, done));
 
 function say(text) {
   messageEl.textContent = text;
