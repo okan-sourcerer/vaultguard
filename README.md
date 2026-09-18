@@ -4,7 +4,7 @@ An offline-first Android password manager. Credentials are encrypted on-device w
 key derived from a master password that never leaves the device and is never stored.
 Optional Google-account sync replicates only encrypted blobs.
 
-**Status: pre-1.0, single-install.** Not published. Not audited.
+**Status: pre-1.0.** Not audited.
 
 A full review in August 2026 found 53 defects, including eight that could destroy or
 orphan a vault. All of those are fixed, along with every security and sync finding; the
@@ -30,6 +30,23 @@ and a forgotten master password is unrecoverable by design.
 - **Backup** — encrypted JSON export/import.
 - **Cloud sync** — optional Firestore replication of encrypted blobs, keyed to a Google
   account.
+
+## Install
+
+Every tagged release carries a signed Android APK and a desktop installer per platform,
+built by [the release workflow](.github/workflows/release.yml):
+
+| | |
+| --- | --- |
+| Android | [VaultGuard-android.apk](../../releases/latest/download/VaultGuard-android.apk) |
+| Windows | [VaultGuard-windows.msi](../../releases/latest/download/VaultGuard-windows.msi) |
+| macOS | [VaultGuard-macos.dmg](../../releases/latest/download/VaultGuard-macos.dmg) |
+| Linux | [VaultGuard-linux.deb](../../releases/latest/download/VaultGuard-linux.deb) · [VaultGuard-linux.rpm](../../releases/latest/download/VaultGuard-linux.rpm) |
+
+The desktop installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper
+warn before the first run. The desktop client needs a vault the phone has published to
+cloud sync; it has no local database of its own. The browser extension is loaded unpacked
+for now — see [extension/README.md](extension/README.md).
 
 ## Build and run
 
@@ -88,3 +105,8 @@ app/src/main/java/com/vaultguard/app/
 
 Read [docs/SECURITY.md](docs/SECURITY.md) before changing anything under `security/`.
 It records which values are frozen because live vaults depend on them.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE). A password manager is the one kind of program
+whose forks should be obliged to stay readable; that is the whole reason for the choice.
