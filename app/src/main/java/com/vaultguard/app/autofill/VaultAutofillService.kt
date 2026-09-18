@@ -209,7 +209,8 @@ class VaultAutofillService : AutofillService() {
             return
         }
 
-        // If the user has already dismissed the save prompt for this app/site, do not show it again
+        // Belt and braces: a fill response built before the dismissal was recorded can
+        // still deliver a save. The decision that matters is the one in addSaveInfo.
         if (dismissedPrefs.isDismissed(merged.webDomain, merged.packageName)) {
             callback.onSuccess()
             return
@@ -221,13 +222,10 @@ class VaultAutofillService : AutofillService() {
         // respond when it is done.
         scope.launch {
             try {
-                val known = if (masterPasswordManager.isVaultUnlocked) {
-                    findMatchingCredentials(merged.webDomain, merged.packageName)
-                } else {
-                    emptyList()
-                }
+                val everything = if (masterPasswordManager.isVaultUnlocked) decryptAll() else emptyList()
+                val known = CredentialMatcher.match(everything, merged.webDomain, merged.packageName)
 
-                val decision = SaveDecision.decide(username, password, known)
+                val decision = SaveDecision.decide(username, password, known, everything)
                 if (decision == SaveDecision.Outcome.Ignore) {
                     callback.onSuccess()
                     return@launch
@@ -242,6 +240,11 @@ class VaultAutofillService : AutofillService() {
                     // to replace the stored one instead of adding a second entry (#56).
                     (decision as? SaveDecision.Outcome.UpdateExisting)?.let {
                         putExtra(AutofillSaveActivity.EXTRA_UPDATE_ID, it.id)
+                    }
+                    // The same account is saved for another site or app: offer to add this
+                    // one to that entry rather than creating its twin.
+                    (decision as? SaveDecision.Outcome.LinkExisting)?.let {
+                        putExtra(AutofillSaveActivity.EXTRA_LINK_ID, it.id)
                     }
                 }
 
@@ -274,11 +277,15 @@ class VaultAutofillService : AutofillService() {
      * that had drifted apart — with the looser one guarding the locked-vault path
      * (finding #11). There is now one.
      */
-    private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> {
+    private fun findMatchingCredentials(webDomain: String?, packageName: String?): List<Credential> =
+        CredentialMatcher.match(decryptAll(), webDomain, packageName)
+
+    /** Every live entry, decrypted. Empty when locked. */
+    private fun decryptAll(): List<Credential> {
         if (!masterPasswordManager.isVaultUnlocked) return emptyList()
 
         val key = masterPasswordManager.getSessionKey()
-        val decrypted = credentialDao.getAllBlocking()
+        return credentialDao.getAllBlocking()
             .filter { !it.isDeleted }
             .mapNotNull { entity ->
                 try {
@@ -295,8 +302,6 @@ class VaultAutofillService : AutofillService() {
                     null
                 }
             }
-
-        return CredentialMatcher.match(decrypted, webDomain, packageName)
     }
 
     private fun buildDataset(
@@ -359,6 +364,12 @@ class VaultAutofillService : AutofillService() {
         val allIds = parsed.usernameFields + parsed.passwordFields
         if (allIds.isEmpty()) return
 
+        // Decided here, at fill time, or it is not decided at all: the platform draws its
+        // own "Save to VaultGuard?" bar whenever a response carries a SaveInfo, and it does
+        // so before onSaveRequest runs. Checking the dismissal there - as this used to -
+        // left the bar appearing on every login and doing nothing when tapped.
+        if (dismissedPrefs.isDismissed(parsed.webDomain, parsed.packageName)) return
+
         // Declare what this screen actually holds. The pair was announced unconditionally
         // before, which told the platform a password was coming on screens that had none.
         var dataTypes = 0
@@ -373,6 +384,22 @@ class VaultAutofillService : AutofillService() {
         // that does carry the password arrives after (#54).
         if (parsed.passwordFields.isEmpty()) {
             saveInfoBuilder.setFlags(SaveInfo.FLAG_DELAY_SAVE)
+        }
+
+        // The bar's negative button becomes "Never" and tells us, so declining the
+        // platform's prompt is remembered exactly like Skip on our own screen. Only when
+        // the request can be attributed - a browser with no domain would silence every site.
+        if (AutofillDismissedPrefs.keyFor(parsed.webDomain, parsed.packageName) != null) {
+            val never = Intent(this, AutofillNeverReceiver::class.java).apply {
+                action = AutofillNeverReceiver.ACTION
+                putExtra(AutofillNeverReceiver.EXTRA_WEB_DOMAIN, parsed.webDomain)
+                putExtra(AutofillNeverReceiver.EXTRA_PACKAGE_NAME, parsed.packageName)
+            }
+            val sender = PendingIntent.getBroadcast(
+                this, nextRequestCode(), never,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            ).intentSender
+            saveInfoBuilder.setNegativeAction(SaveInfo.NEGATIVE_BUTTON_STYLE_NEVER, sender)
         }
 
         builder.setSaveInfo(saveInfoBuilder.build())

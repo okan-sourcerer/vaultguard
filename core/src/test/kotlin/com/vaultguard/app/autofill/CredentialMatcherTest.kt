@@ -71,12 +71,51 @@ class CredentialMatcherTest {
     }
 
     @Test
-    fun `a sibling subdomain does not match through a shared parent`() {
-        // mail.google.com and evil.google.com share a parent, but neither is a subdomain
-        // of the other, so the credential for one must not fill on the other.
-        val mail = credential(url = "https://mail.google.com")
+    fun `a sibling subdomain matches through the registrable domain`() {
+        // Saved on login.site.com, wanted on app.site.com. Both belong to whoever owns
+        // site.com; every browser password manager treats them as one site.
+        val login = credential(url = "https://login.site.com")
 
-        assertTrue(matchDomain("evil.google.com", mail).isEmpty())
+        assertEquals(listOf(login), matchDomain("app.site.com", login))
+        assertEquals(listOf(login), matchDomain("site.com", login))
+    }
+
+    @Test
+    fun `a sibling subdomain does not match across a shared host`() {
+        // alice.github.io and bob.github.io are different people. The registrable domain
+        // stops at the shared host, so neither fills on the other.
+        val alice = credential(url = "https://alice.github.io")
+
+        assertTrue(matchDomain("bob.github.io", alice).isEmpty())
+        // But a subdomain of alice's own still does.
+        assertEquals(listOf(alice), matchDomain("blog.alice.github.io", alice))
+    }
+
+    @Test
+    fun `a sibling match ranks below exact and parent-child matches`() {
+        val sibling = credential(id = "sibling", url = "https://login.site.com")
+        val parent = credential(id = "parent", url = "https://site.com")
+        val exact = credential(id = "exact", url = "https://app.site.com")
+
+        val ids = matchDomain("app.site.com", sibling, parent, exact).map { it.id }
+        assertEquals(setOf("exact", "parent", "sibling"), ids.toSet())
+        assertEquals("sibling", ids.last())
+    }
+
+    @Test
+    fun `registrable domains respect country-code second levels and refuse IPs`() {
+        assertEquals("site.com", CredentialMatcher.registrableDomain("login.site.com"))
+        assertEquals("site.com", CredentialMatcher.registrableDomain("site.com"))
+        assertEquals("example.co.uk", CredentialMatcher.registrableDomain("shop.example.co.uk"))
+        assertEquals("bank.com.tr", CredentialMatcher.registrableDomain("internet.bank.com.tr"))
+        assertEquals("alice.github.io", CredentialMatcher.registrableDomain("www.alice.github.io"))
+        assertNull(CredentialMatcher.registrableDomain("github.io"))
+        assertNull(CredentialMatcher.registrableDomain("co.uk"))
+        assertNull(CredentialMatcher.registrableDomain("10.0.0.1"))
+        assertNull(CredentialMatcher.registrableDomain("localhost"))
+        // A lookalike is still a different registrable domain.
+        assertFalse(CredentialMatcher.siblingsMatch("login.site.com", "app.notsite.com"))
+        assertFalse(CredentialMatcher.siblingsMatch("a.example.co.uk", "b.other.co.uk"))
     }
 
     @Test

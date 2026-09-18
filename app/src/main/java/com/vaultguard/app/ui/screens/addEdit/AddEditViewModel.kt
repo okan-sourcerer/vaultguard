@@ -166,6 +166,30 @@ class AddEditViewModel @Inject constructor(
     fun onNotesChange(value: String) { _uiState.value = _uiState.value.copy(notes = value) }
     fun onCategoryChange(value: String) { _uiState.value = _uiState.value.copy(category = value) }
     fun onTagsChange(value: String) { _uiState.value = _uiState.value.copy(tags = value) }
+
+    /**
+     * Other websites and apps this entry fills. The matcher ranks these above the url,
+     * autofill's save flow adds to them, and until now nothing showed them (they were
+     * carried through editing invisibly, #61). A domain is normalised to its host; an
+     * app is a package name as-is.
+     */
+    fun onAddLinkedDomain(value: String) {
+        val host = com.vaultguard.app.autofill.CredentialMatcher.normaliseHost(value) ?: return
+        _uiState.value = _uiState.value.copy(linkedDomains = (_uiState.value.linkedDomains + host).distinct())
+    }
+
+    fun onRemoveLinkedDomain(value: String) {
+        _uiState.value = _uiState.value.copy(linkedDomains = _uiState.value.linkedDomains - value)
+    }
+
+    fun onAddLinkedPackage(value: String) {
+        val pkg = value.trim().lowercase().takeIf { it.contains('.') } ?: return
+        _uiState.value = _uiState.value.copy(linkedPackages = (_uiState.value.linkedPackages + pkg).distinct())
+    }
+
+    fun onRemoveLinkedPackage(value: String) {
+        _uiState.value = _uiState.value.copy(linkedPackages = _uiState.value.linkedPackages - value)
+    }
     fun onPinnedChange(value: Boolean) { _uiState.value = _uiState.value.copy(isPinned = value) }
 
     fun onSelectPreset(presetId: String) {

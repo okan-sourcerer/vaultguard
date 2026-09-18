@@ -68,8 +68,83 @@ object CredentialMatcher {
             val derived = domainFromPackage(pkg)
             if (derived != null && hostsMatch(credentialHost, derived)) return 3
         }
+
+        // Siblings under one registrable domain: a credential saved on login.site.com is
+        // the one wanted on app.site.com. Ranked below every closer relationship, and
+        // refused across shared hosts where siblings belong to different people.
+        if (domain != null) {
+            if (credential.linkedDomains.any { siblingsMatch(normaliseHost(it), domain) }) return 4
+            if (credentialHost != null && siblingsMatch(credentialHost, domain)) return 5
+        }
         return null
     }
+
+    /**
+     * True when the hosts share a registrable domain but neither contains the other -
+     * `login.site.com` and `app.site.com`. This is how browser password managers match
+     * (Chrome, Firefox and Bitwarden all use the registrable domain), and the case the
+     * stricter parent/child rule got wrong in practice.
+     *
+     * The registrable domain is computed without the full Public Suffix List. Multi-part
+     * public suffixes with a country code (`co.uk`, `com.tr`) are recognised by shape, and
+     * [SHARED_HOSTS] names the hosting suffixes where a sibling is a different owner -
+     * `alice.github.io` must never fill on `bob.github.io`. That list is a guard, not the
+     * PSL; a site it does not know can still be linked explicitly on the credential.
+     */
+    fun siblingsMatch(a: String?, b: String?): Boolean {
+        if (a.isNullOrEmpty() || b.isNullOrEmpty()) return false
+        if (hostsMatch(a, b)) return false
+        val ra = registrableDomain(a) ?: return false
+        val rb = registrableDomain(b) ?: return false
+        return ra == rb
+    }
+
+    /**
+     * `login.site.com` -> `site.com`; `shop.example.co.uk` -> `example.co.uk`;
+     * `www.alice.github.io` -> `alice.github.io` (the shared host counts as the suffix).
+     * Null for IP literals and anything with too few labels to have a registrable part.
+     */
+    fun registrableDomain(host: String): String? {
+        if (host.startsWith("[") || host.all { it.isDigit() || it == '.' }) return null
+        val labels = host.split('.').filter { it.isNotEmpty() }
+        if (labels.size < 2) return null
+
+        val shared = SHARED_HOSTS.firstOrNull { host == it || host.endsWith(".$it") }
+        val suffixLabels = when {
+            shared != null -> shared.count { it == '.' } + 1
+            // A two-letter country code behind a generic second-level label: co.uk, com.tr,
+            // gov.au. Three labels are then the registrable domain.
+            labels.last().length == 2 && labels[labels.size - 2] in COUNTRY_SECOND_LEVEL -> 2
+            else -> 1
+        }
+        if (labels.size <= suffixLabels) return null
+        return labels.takeLast(suffixLabels + 1).joinToString(".")
+    }
+
+    private val COUNTRY_SECOND_LEVEL = setOf(
+        "co", "com", "org", "net", "gov", "edu", "ac", "mil", "gen", "biz", "info", "or", "ne",
+        "go", "gr", "ltd", "plc", "me", "sch", "nhs", "police", "mod", "k12", "web", "tv", "av",
+        "bel", "pol", "dr", "kep", "tsk", "bbs", "name", "pro", "nom", "id", "in", "asn", "conf"
+    )
+
+    /**
+     * Suffixes under which each subdomain is somebody else's site. Matching across them
+     * would offer one tenant's password to another - the shape of finding #10, one level
+     * down. Not exhaustive; it names the hosts a password manager is likely to meet.
+     */
+    val SHARED_HOSTS: Set<String> = setOf(
+        "github.io", "gitlab.io", "bitbucket.io", "pages.dev", "workers.dev",
+        "herokuapp.com", "netlify.app", "vercel.app", "web.app", "firebaseapp.com",
+        "appspot.com", "azurewebsites.net", "cloudfront.net", "amazonaws.com",
+        "blogspot.com", "wordpress.com", "tumblr.com", "wixsite.com", "squarespace.com",
+        "weebly.com", "glitch.me", "repl.co", "replit.app", "ngrok.io", "ngrok-free.app",
+        "trycloudflare.com", "dyndns.org", "no-ip.org", "duckdns.org", "ddns.net",
+        "myshopify.com", "sharepoint.com", "onmicrosoft.com", "zendesk.com", "freshdesk.com",
+        "okta.com", "auth0.com", "salesforce.com", "force.com", "atlassian.net",
+        "cloudapp.net", "linodeusercontent.com", "ondigitalocean.app", "fly.dev",
+        "onrender.com", "railway.app", "koyeb.app", "surge.sh", "neocities.org",
+        "000webhostapp.com", "x10.mx", "epizy.com", "ucoz.com", "narod.ru", "ucoz.net"
+    )
 
     /**
      * True when the hosts are equal, or one is a subdomain of the other.

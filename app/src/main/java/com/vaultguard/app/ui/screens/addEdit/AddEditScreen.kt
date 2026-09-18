@@ -19,6 +19,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.InputChip
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -286,6 +296,33 @@ fun AddEditScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Where else this entry fills. One account, several front doors: the website,
+            // its app, a second domain. Autofill adds to these when it saves; this is
+            // where they can be seen and changed.
+            Text("Also fills on", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Other websites and apps that use this same login. Subdomains of the URL " +
+                    "above already match.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            LinkedList(
+                items = uiState.linkedDomains,
+                placeholder = "Website, e.g. login.example.com",
+                onAdd = viewModel::onAddLinkedDomain,
+                onRemove = viewModel::onRemoveLinkedDomain
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            LinkedList(
+                items = uiState.linkedPackages,
+                placeholder = "App package, e.g. com.example.app",
+                onAdd = viewModel::onAddLinkedPackage,
+                onRemove = viewModel::onRemoveLinkedPackage
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Pin toggle
@@ -331,4 +368,49 @@ fun AddEditScreen(
             }
         }
     }
+}
+
+/** A row of removable chips plus a field that adds one on Enter or the + button. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun LinkedList(
+    items: List<String>,
+    placeholder: String,
+    onAdd: (String) -> Unit,
+    onRemove: (String) -> Unit
+) {
+    var draft by remember { mutableStateOf("") }
+    fun commit() {
+        if (draft.isNotBlank()) {
+            onAdd(draft)
+            draft = ""
+        }
+    }
+    if (items.isNotEmpty()) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items.forEach { item ->
+                InputChip(
+                    selected = false,
+                    onClick = { onRemove(item) },
+                    label = { Text(item) },
+                    trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove $item") }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+    }
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { draft = it },
+        placeholder = { Text(placeholder) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done, keyboardType = KeyboardType.Uri),
+        keyboardActions = KeyboardActions(onDone = { commit() }),
+        trailingIcon = {
+            IconButton(onClick = { commit() }, enabled = draft.isNotBlank()) {
+                Icon(Icons.Default.Add, contentDescription = "Add")
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+    )
 }

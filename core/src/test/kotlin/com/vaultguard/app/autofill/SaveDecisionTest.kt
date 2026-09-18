@@ -119,4 +119,51 @@ class SaveDecisionTest {
 
         assertEquals(SaveDecision.Outcome.CreateNew, outcome)
     }
+
+    // -- Linking to an entry saved for another surface ----------------------------------
+
+    private fun entry(id: String, username: String, password: String, url: String = "https://site.com") =
+        Credential(id = id, siteName = id, url = url, username = username, password = password)
+
+    @Test
+    fun `an identical account saved elsewhere is offered for linking, not duplicated`() {
+        val web = entry("web", "okan", "pw", url = "https://site.com")
+
+        val outcome = SaveDecision.decide("okan", "pw", known = emptyList(), everything = listOf(web))
+
+        assertEquals(SaveDecision.Outcome.LinkExisting("web"), outcome)
+    }
+
+    @Test
+    fun `a different password elsewhere is not the same account`() {
+        val web = entry("web", "okan", "other")
+
+        assertEquals(SaveDecision.Outcome.CreateNew, SaveDecision.decide("okan", "pw", emptyList(), listOf(web)))
+    }
+
+    @Test
+    fun `two candidate twins make the link a guess, so a new entry is offered`() {
+        val a = entry("a", "okan", "pw")
+        val b = entry("b", "okan", "pw", url = "https://other.com")
+
+        assertEquals(SaveDecision.Outcome.CreateNew, SaveDecision.decide("okan", "pw", emptyList(), listOf(a, b)))
+    }
+
+    @Test
+    fun `a site match still takes precedence over linking`() {
+        val here = entry("here", "okan", "old")
+        val elsewhere = entry("elsewhere", "okan", "pw", url = "https://other.com")
+
+        // Known for this site with a different password: an update, not a link.
+        assertEquals(
+            SaveDecision.Outcome.UpdateExisting("here"),
+            SaveDecision.decide("okan", "pw", listOf(here), listOf(here, elsewhere))
+        )
+    }
+
+    @Test
+    fun `without a username nothing is linked`() {
+        val web = entry("web", "", "pw")
+        assertEquals(SaveDecision.Outcome.CreateNew, SaveDecision.decide("", "pw", emptyList(), listOf(web)))
+    }
 }

@@ -60,6 +60,7 @@ class AutofillSaveActivity : ComponentActivity() {
          * screen offers to replace that password rather than to create a second entry.
          */
         const val EXTRA_UPDATE_ID = "update_id"
+        const val EXTRA_LINK_ID = "link_id"
     }
 
     @Inject lateinit var credentialRepository: CredentialRepository
@@ -77,6 +78,7 @@ class AutofillSaveActivity : ComponentActivity() {
         val webDomain = intent.getStringExtra(EXTRA_WEB_DOMAIN) ?: ""
         val appPackage = intent.getStringExtra(EXTRA_PACKAGE_NAME) ?: ""
         val updateId = intent.getStringExtra(EXTRA_UPDATE_ID)
+        val linkId = intent.getStringExtra(EXTRA_LINK_ID)
 
         val suggestedName = webDomain.ifEmpty {
             appPackage.split(".").lastOrNull() ?: "Unknown"
@@ -121,6 +123,22 @@ class AutofillSaveActivity : ComponentActivity() {
                                 )
                                 finish()
                             },
+                            onFinished = { finish() }
+                        )
+                        return@Surface
+                    }
+
+                    // The same account already saved for another site or app. Adding this
+                    // one to it keeps one entry per account; a twin would go stale the
+                    // first time the password changed on one of them.
+                    var linkDeclined by remember { mutableStateOf(false) }
+                    if (linkId != null && !linkDeclined) {
+                        LinkExistingPrompt(
+                            credentialId = linkId,
+                            webDomain = webDomain.ifEmpty { null },
+                            packageName = appPackage.ifEmpty { null },
+                            repository = credentialRepository,
+                            onCreateNewInstead = { linkDeclined = true },
                             onFinished = { finish() }
                         )
                         return@Surface
@@ -318,6 +336,77 @@ private fun UpdatePasswordPrompt(
                 "VaultGuard locked before the entry could be read. Try again.",
                 onFinished
             )
+        }
+    }
+}
+
+@Composable
+private fun LinkExistingPrompt(
+    credentialId: String,
+    webDomain: String?,
+    packageName: String?,
+    repository: CredentialRepository,
+    onCreateNewInstead: () -> Unit,
+    onFinished: () -> Unit
+) {
+    var lookup by remember { mutableStateOf<CredentialLookup?>(null) }
+    var isBusy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(credentialId) {
+        lookup = repository.getById(credentialId)
+    }
+
+    val where = webDomain ?: packageName ?: "this app"
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (val current = lookup) {
+            null -> Text("Checking your vault…", style = MaterialTheme.typography.bodyMedium)
+
+            is CredentialLookup.Found -> {
+                val credential = current.credential
+                Text("Same account?", style = MaterialTheme.typography.headlineSmall)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "${credential.displayName} already has this username and password.\n\n" +
+                        "Add $where to that entry, so it fills here too? Or keep them separate.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = onCreateNewInstead,
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Keep separate") }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Button(
+                        onClick = {
+                            if (isBusy) return@Button
+                            isBusy = true
+                            scope.launch {
+                                val linked = credential.copy(
+                                    linkedDomains = (credential.linkedDomains + listOfNotNull(webDomain)).distinct(),
+                                    linkedPackages = (credential.linkedPackages + listOfNotNull(packageName)).distinct()
+                                )
+                                repository.save(linked)
+                                onFinished()
+                            }
+                        },
+                        enabled = !isBusy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (isBusy) "Adding…" else "Add to ${credential.displayName}") }
+                }
+            }
+
+            // No sound entry to link to. Fall through to creating a new one rather than
+            // losing what was typed.
+            is CredentialLookup.Undecryptable, CredentialLookup.NotFound, CredentialLookup.Locked ->
+                LaunchedEffect(Unit) { onCreateNewInstead() }
         }
     }
 }
