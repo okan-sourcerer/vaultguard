@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.vaultguard.app.BuildConfig
 import timber.log.Timber
 import androidx.core.net.toUri
 
@@ -77,6 +78,7 @@ private const val AUTOFILL_SETTINGS_PATH =
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onLockVault: () -> Unit,
+    onNavigateToFeedback: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -579,6 +581,27 @@ fun SettingsScreen(
                         stats.categoryCounts.toSortedMap().forEach { (category, count) ->
                             StatRow(category, "$count")
                         }
+                    }
+                }
+            }
+
+            // Only when the build knows a hub; a button that always fails is worse than none.
+            if (BuildConfig.FEEDBACK_KEY.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("About", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToFeedback() }
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Send feedback", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "A bug, a request, a question. You see exactly what is sent.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

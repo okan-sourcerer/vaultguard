@@ -9,6 +9,11 @@ name: Release
 #   GOOGLE_SERVICES_JSON        app/google-services.json, base64
 #   ANDROID_KEYSTORE            the release keystore (.jks), base64
 #   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET
+#                               the Google OAuth "Desktop app" client, baked into the
+#                               desktop build so a downloaded copy can sign in
+#   FEEDBACK_URL, FEEDBACK_KEY  the feedback hub endpoint and write-only key; optional,
+#                               and without them neither client shows "Send feedback"
 #
 # Nothing here signs the desktop installers. Windows SmartScreen and macOS Gatekeeper will
 # both warn about them until a code-signing certificate exists; that is a purchase, not a
@@ -66,6 +71,8 @@ jobs:
         run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > "$RUNNER_TEMP/release.jks"
       - name: Build the signed release APK
         env:
+          VAULTGUARD_FEEDBACK_URL: ${{ secrets.FEEDBACK_URL }}
+          VAULTGUARD_FEEDBACK_KEY: ${{ secrets.FEEDBACK_KEY }}
           VAULTGUARD_KEYSTORE: ${{ runner.temp }}/release.jks
           VAULTGUARD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           VAULTGUARD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -123,7 +130,14 @@ jobs:
       - name: Install rpmbuild
         if: matrix.type == 'rpm'
         run: sudo apt-get update && sudo apt-get install -y rpm
+      # projectId and apiKey are read from google-services.json at build time.
+      - run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
       - name: Build the installer
+        env:
+          VAULTGUARD_OAUTH_CLIENT_ID: ${{ secrets.OAUTH_CLIENT_ID }}
+          VAULTGUARD_OAUTH_CLIENT_SECRET: ${{ secrets.OAUTH_CLIENT_SECRET }}
+          VAULTGUARD_FEEDBACK_URL: ${{ secrets.FEEDBACK_URL }}
+          VAULTGUARD_FEEDBACK_KEY: ${{ secrets.FEEDBACK_KEY }}
         run: >
           ./gradlew :desktop:packageInstaller
           -Pvaultguard.version=${{ needs.version.outputs.version }}

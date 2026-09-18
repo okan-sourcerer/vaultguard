@@ -198,14 +198,26 @@ with it, and the vault becomes unrecoverable. Check the signing certificate inst
 
 ## The desktop client, in one paragraph
 
-`--cloud` and `--service` both reach the vault through `CloudConnect`: derive the master key
-against a locally stored salt, open the saved Firebase refresh token with it, refresh the
+`--cloud` and `--service` both reach the vault through `CloudConnect`, using Firebase and
+OAuth identifiers baked into the jar at build time (`bakedDefaults` in
+`desktop/build.gradle.kts`; `~/.vaultguard/desktop.properties` overrides key by key): derive
+the master key against a locally stored salt, open the saved Firebase refresh token with it, refresh the
 session, fetch `vaults/{uid}`, check the salt still matches, unwrap the vault key. One
 Argon2id run serves the token and the vault. Writes are conditional on the document version
 that was read, so a race with the phone is refused rather than merged — `SyncMerge`'s
 conflict rules still have exactly one caller, on the phone. The tray holds the unlocked
 vault for the browser extension and drops it after fifteen minutes idle, measured on a
 monotonic clock from the last *use* of the vault rather than from any user input.
+
+## Feedback
+
+Both clients can post to a feedback hub, and `FeedbackReport` in `:core` is the whole of
+what they send: type, message, version, environment, platform, OS, and on Android the
+device model, locale and timezone. No logs, no stack traces, no metadata, no account or
+install id — a test pins that list. The hub accepts more; a password manager must not
+send it. The JSON is rendered verbatim on the screen before the user presses Send. The
+endpoint and key come from `vaultguard.feedbackUrl`/`feedbackKey` (or the
+`VAULTGUARD_FEEDBACK_*` environment) at build time; absent, the entry points are hidden.
 
 ## Testing notes
 

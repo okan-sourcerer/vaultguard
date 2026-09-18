@@ -29,6 +29,7 @@ class TrayApp(
 ) {
 
     private val search = SearchDialog(service, clipboard)
+    private val feedback = FeedbackDialog()
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")
@@ -66,6 +67,10 @@ class TrayApp(
             add(lockItem)
             add(signOutItem)
             addSeparator()
+            // Only when the build knows a hub; a menu item that always fails is worse than none.
+            if (feedback.isAvailable) {
+                add(MenuItem("Send feedback...").apply { addActionListener { feedback.show() } })
+            }
             add(MenuItem("Quit").apply { addActionListener { quit() } })
         }
 

@@ -44,6 +44,79 @@ dependencies {
 }
 
 /**
+ * The identifiers a downloaded copy needs to reach the vault, baked into the jar.
+ *
+ * `--cloud` and the tray both talk to one Firebase project through one OAuth desktop
+ * client. Before this the values lived only in `~/.vaultguard/desktop.properties`, which
+ * the developer has and a person who installed the .msi from a website does not. They are
+ * read at build time from, in order: a Gradle property (`-Pvaultguard.firebaseProjectId=`,
+ * or `~/.gradle/gradle.properties`), an environment variable (`VAULTGUARD_FIREBASE_PROJECT_ID`),
+ * and — for the two Firebase values only — `app/google-services.json`, which is on disk
+ * wherever the Android module builds. Anything still missing is written empty and must
+ * then come from the user's file; `DesktopConfig` says which key.
+ *
+ * None of it is secret. The Firebase API key and project id are shipped in every APK by
+ * design, and Google's own documentation says an installed app's OAuth client secret is
+ * not treated as confidential. The feedback key only permits writing feedback.
+ */
+// Passed as `-Pvaultguard.version=1.2.3` by the release workflow; MSI wants three numbers.
+val appVersion: String = (findProperty("vaultguard.version") as String?) ?: "1.0.0"
+
+val bakedDefaults: Map<String, String> = run {
+    fun setting(property: String, env: String): String? =
+        (findProperty("vaultguard.$property") as String?)?.takeIf { it.isNotBlank() }
+            ?: System.getenv(env)?.takeIf { it.isNotBlank() }
+
+    val googleServices = rootProject.file("app/google-services.json")
+    val fromGoogleServices: Map<String, String> = if (googleServices.isFile) {
+        val json = groovy.json.JsonSlurper().parse(googleServices) as Map<*, *>
+        val projectInfo = json["project_info"] as? Map<*, *>
+        val firstClient = (json["client"] as? List<*>)?.firstOrNull() as? Map<*, *>
+        val firstKey = (firstClient?.get("api_key") as? List<*>)?.firstOrNull() as? Map<*, *>
+        mapOf(
+            "projectId" to (projectInfo?.get("project_id") as? String).orEmpty(),
+            "apiKey" to (firstKey?.get("current_key") as? String).orEmpty()
+        )
+    } else {
+        emptyMap()
+    }
+
+    mapOf(
+        "projectId" to (setting("firebaseProjectId", "VAULTGUARD_FIREBASE_PROJECT_ID") ?: fromGoogleServices["projectId"].orEmpty()),
+        "apiKey" to (setting("firebaseApiKey", "VAULTGUARD_FIREBASE_API_KEY") ?: fromGoogleServices["apiKey"].orEmpty()),
+        "oauthClientId" to setting("oauthClientId", "VAULTGUARD_OAUTH_CLIENT_ID").orEmpty(),
+        "oauthClientSecret" to setting("oauthClientSecret", "VAULTGUARD_OAUTH_CLIENT_SECRET").orEmpty(),
+        "feedbackUrl" to setting("feedbackUrl", "VAULTGUARD_FEEDBACK_URL").orEmpty(),
+        "feedbackKey" to setting("feedbackKey", "VAULTGUARD_FEEDBACK_KEY").orEmpty(),
+        "version" to appVersion
+    )
+}
+
+val generatedResources = layout.buildDirectory.dir("generated/defaults")
+
+val writeDefaults by tasks.registering {
+    description = "Writes the baked configuration resource."
+    val target = generatedResources.map { it.file("vaultguard-defaults.properties") }
+    inputs.properties(bakedDefaults)
+    outputs.file(target)
+    doLast {
+        val file = target.get().asFile
+        file.parentFile.mkdirs()
+        // Written by hand rather than through java.util.Properties, which prepends a
+        // timestamp comment and would make every build's jar differ.
+        file.writeText(
+            bakedDefaults.entries.joinToString("") { (key, value) -> "$key=${escapeProperty(value)}\n" }
+        )
+    }
+}
+
+fun escapeProperty(value: String): String =
+    value.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "").replace("=", "\\=").replace(":", "\\:")
+
+sourceSets["main"].resources.srcDir(generatedResources)
+tasks.named("processResources") { dependsOn(writeDefaults) }
+
+/**
  * A native launcher, so Windows has something to name and draw.
  *
  * Without this the tray service is `javaw.exe` in Task Manager with a coffee cup beside it,
@@ -65,9 +138,7 @@ dependencies {
  * would run them silently and show nothing. It is also what the native-messaging wrapper
  * calls: browsers spawn hosts without a console window, so nothing flashes.
  *
- * Passed as `-Pvaultguard.version=1.2.3` by the release workflow; MSI wants three numbers.
  */
-val appVersion: String = (findProperty("vaultguard.version") as String?) ?: "1.0.0"
 
 // Constant for the life of the product. Windows Installer uses it to recognise a newer
 // MSI as an upgrade of the installed one and replace it in place; change it and every

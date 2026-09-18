@@ -9,6 +9,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.vaultguard.app.ui.screens.addEdit.AddEditScreen
 import com.vaultguard.app.ui.screens.detail.CredentialDetailScreen
+import com.vaultguard.app.ui.screens.feedback.FeedbackScreen
 import com.vaultguard.app.ui.screens.generator.PasswordGeneratorScreen
 import com.vaultguard.app.ui.screens.recovery.VaultRecoveryScreen
 import com.vaultguard.app.ui.screens.settings.SettingsScreen
@@ -43,6 +44,7 @@ sealed class Screen(val route: String) {
         const val RESULT_KEY = "generated_password"
     }
     data object Settings : Screen("settings")
+    data object Feedback : Screen("feedback")
 
     /** Shown when vault.db exists but cannot be decrypted (finding #1). */
     data object Recovery : Screen("recovery")
@@ -172,12 +174,17 @@ fun NavGraph(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onNavigateToFeedback = { navController.navigate(Screen.Feedback.route) },
                 onLockVault = {
                     navController.navigate(Screen.Unlock.route) {
                         popUpTo(0) { inclusive = true }
                     }
                 }
             )
+        }
+
+        composable(Screen.Feedback.route) {
+            FeedbackScreen(onNavigateBack = { navController.popBackStack() })
         }
     }
 }

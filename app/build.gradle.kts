@@ -22,6 +22,15 @@ android {
         versionName = (findProperty("vaultguard.version") as String?) ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // The feedback hub. Empty in a build without them, and Settings then shows no
+        // "Send feedback" entry. The key permits writing feedback and nothing else, which
+        // is why it can sit in a distributed APK. Same names as the desktop build takes.
+        fun setting(property: String, env: String): String =
+            (findProperty("vaultguard.$property") as String?)?.takeIf { it.isNotBlank() }
+                ?: System.getenv(env).orEmpty()
+        buildConfigField("String", "FEEDBACK_URL", "\"${setting("feedbackUrl", "VAULTGUARD_FEEDBACK_URL")}\"")
+        buildConfigField("String", "FEEDBACK_KEY", "\"${setting("feedbackKey", "VAULTGUARD_FEEDBACK_KEY")}\"")
     }
 
     // Release signing material comes from the environment and is never on disk in the
