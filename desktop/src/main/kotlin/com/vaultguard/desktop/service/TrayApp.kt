@@ -5,7 +5,10 @@ import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.TrayIcon
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.swing.JOptionPane
@@ -25,18 +28,18 @@ import javax.swing.SwingUtilities
  */
 class TrayApp(
     private val service: VaultService,
-    private val bridge: BridgeServer = BridgeServer(service),
     private val clipboard: ClipboardGuard = ClipboardGuard()
 ) {
 
     private val search = SearchDialog(service, clipboard)
     private val feedback = FeedbackDialog()
     private val settings = SettingsDialog()
+    private val bridge = BridgeServer(service, onOpen = { open() })
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")
-    private val searchItem = MenuItem("Search...")
-    private val unlockItem = MenuItem("Unlock...")
+    private val openItem = MenuItem("Open VaultGuard")
+    private val unlockItem = MenuItem("Unlock")
     private val refreshItem = MenuItem("Refresh")
     private val lockItem = MenuItem("Lock")
     private val signOutItem = MenuItem("Sign out")
@@ -58,11 +61,15 @@ class TrayApp(
             return false
         }
 
+        // One primary action, "Open", reachable from everywhere a person might click:
+        // this item, a left-click on the icon, any notification, and a second launch of
+        // the program. Unlock stays separate for the browser case - let the extension
+        // fill, no window wanted - and is the only action that does not open one.
         val menu = PopupMenu().apply {
             statusItem.isEnabled = false
             add(statusItem)
             addSeparator()
-            add(searchItem)
+            add(openItem)
             add(MenuItem("Settings...").apply { addActionListener { settings.show() } })
             addSeparator()
             add(unlockItem)
@@ -79,10 +86,18 @@ class TrayApp(
 
         trayIcon = TrayIcon(VaultIcon.image(16, locked = true), "VaultGuard", menu).apply {
             isImageAutoSize = true
+            // Double-click, and a click on a notification balloon, both arrive here.
+            addActionListener { open() }
+            // A single left-click does not; it is a mouse event. Right-click is the menu.
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (SwingUtilities.isLeftMouseButton(e) && e.clickCount == 1) open()
+                }
+            })
         }
 
-        searchItem.addActionListener { openSearch() }
-        unlockItem.addActionListener { worker.submit { unlock() } }
+        openItem.addActionListener { open() }
+        unlockItem.addActionListener { worker.submit { unlock(showWindow = false) } }
         refreshItem.addActionListener { worker.submit { refresh() } }
         lockItem.addActionListener { worker.submit { lockNow() } }
         signOutItem.addActionListener { worker.submit { signOut() } }
@@ -100,10 +115,12 @@ class TrayApp(
         // wake the process 60 times as often to learn the same thing.
         ticker.scheduleAtFixedRate({ tick() }, 1, 1, TimeUnit.MINUTES)
 
-        if (service.state == ServiceState.SIGNED_OUT) {
-            notify("VaultGuard is running", "Right-click the tray icon and choose Sign in...")
-        } else {
-            notify("VaultGuard is running", "Right-click the tray icon to unlock.")
+        // The only notification for a state the user did not just cause, besides the
+        // idle lock. Clicking it opens - the same as clicking the icon.
+        when (service.state) {
+            ServiceState.SIGNED_OUT -> notify("VaultGuard is running", "Click to sign in.")
+            ServiceState.LOCKED -> notify("VaultGuard is running", "Click to unlock.")
+            ServiceState.UNLOCKED -> Unit
         }
 
         // A fresh install is otherwise a tray icon and nothing else. Once: the marker is
@@ -116,30 +133,45 @@ class TrayApp(
         return true
     }
 
-    private fun openSearch() {
-        if (service.state != ServiceState.UNLOCKED) {
-            SwingUtilities.invokeLater { error("Unlock the vault first.") }
+    /** Guards against a double-click, or a balloon click during a prompt, asking twice. */
+    private val opening = AtomicBoolean(false)
+
+    /**
+     * The primary action. Whatever state the vault is in, the end of this is the window
+     * on screen: unlocked shows it, locked asks for the password first, signed out signs
+     * in first. Nobody should have to come back to the menu to finish what they started.
+     */
+    private fun open() {
+        if (service.state == ServiceState.UNLOCKED) {
+            // credentials() counts as use, so a search keeps the auto-lock at bay while
+            // the window is being driven.
+            search.show()
             return
         }
-        // credentials() counts as use, so a search keeps the auto-lock at bay while the
-        // window is being driven.
-        search.show()
+        if (!opening.compareAndSet(false, true)) return
+        worker.submit {
+            try {
+                unlock(showWindow = true)
+            } finally {
+                opening.set(false)
+            }
+        }
     }
 
     private fun tick() {
         if (service.lockIfIdle()) {
-            notify("Vault locked", "It had been idle. Unlock from the tray when you need it.")
+            notify("Vault locked", "It had been idle. Click to unlock.")
         }
     }
 
-    private fun unlock() {
+    private fun unlock(showWindow: Boolean) {
         val opened = service.unlock(
             askPassword = { label -> askPassword(label) },
             say = { status(it) },
             warn = { message -> SwingUtilities.invokeLater { error(message) } }
         )
-        if (opened) notify("Vault unlocked", "${service.entryCount} entries available.")
         render()
+        if (opened && showWindow) search.show()
     }
 
     private fun refresh() {
@@ -148,19 +180,20 @@ class TrayApp(
             return
         }
         status("Refreshing...")
-        val ok = service.refresh { message -> SwingUtilities.invokeLater { error(message) } }
-        if (ok) notify("Refreshed", "${service.entryCount} entries.")
+        service.refresh { message -> SwingUtilities.invokeLater { error(message) } }
         render()
     }
 
+    // No notification for these: the user just chose them, and the menu's status line
+    // changes in front of them. A balloon confirming a click is noise.
     private fun lockNow() {
         service.lock()
-        notify("Vault locked", "The key is out of memory.")
+        render()
     }
 
     private fun signOut() {
         service.signOut()
-        notify("Signed out", "The saved sign-in has been forgotten.")
+        render()
     }
 
     private fun quit() {
@@ -190,9 +223,8 @@ class TrayApp(
             }
         }
 
-        unlockItem.label = if (state == ServiceState.SIGNED_OUT) "Sign in..." else "Unlock..."
+        unlockItem.label = if (state == ServiceState.SIGNED_OUT) "Sign in" else "Unlock"
         unlockItem.isEnabled = state != ServiceState.UNLOCKED
-        searchItem.isEnabled = state == ServiceState.UNLOCKED
         refreshItem.isEnabled = state == ServiceState.UNLOCKED
         lockItem.isEnabled = state == ServiceState.UNLOCKED
         signOutItem.isEnabled = state != ServiceState.SIGNED_OUT
@@ -255,8 +287,10 @@ fun runTrayService() {
     Theme.apply()
 
     if (!SingleInstance.acquire()) {
-        // A window rather than stderr: this launch came from a double-click or the Run
-        // key, and nobody is watching a console.
+        // The running copy is asked to open instead: a second launch from the Start Menu
+        // means "show me VaultGuard", not "tell me about processes". The dialog is for
+        // when the lock is held but nothing answers, which should not happen.
+        if (NativeHost.askRunningServiceToOpen()) return
         JOptionPane.showMessageDialog(
             null,
             "VaultGuard is already running.\nLook for the padlock in the notification area.",

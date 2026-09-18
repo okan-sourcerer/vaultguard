@@ -45,7 +45,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class BridgeServer(
     private val service: VaultService,
     private val handshakeFile: File = defaultHandshakeFile,
-    private val onWarn: (String) -> Unit = {}
+    private val onWarn: (String) -> Unit = {},
+    /** The tray's primary action; see [BridgeProtocol.Action.OPEN]. */
+    private val onOpen: () -> Unit = {}
 ) {
     companion object {
         val defaultHandshakeFile: File
@@ -140,7 +142,8 @@ class BridgeServer(
                         request = request,
                         state = service.state,
                         credentials = { service.credentials() },
-                        lock = { service.lock() }
+                        lock = { service.lock() },
+                        open = onOpen
                     )
                 )
             }

@@ -47,9 +47,14 @@ object NativeHost {
                 val body = ByteArray(length)
                 input.readFully(body)
 
+                val text = String(body, Charsets.UTF_8)
                 val response = try {
-                    if (bridge == null) bridge = Bridge.connect(handshakeFile)
-                    bridge.ask(String(body, Charsets.UTF_8))
+                    if (!isRelayable(text)) {
+                        BridgeProtocol.error("That action is not available to the browser.").toString()
+                    } else {
+                        if (bridge == null) bridge = Bridge.connect(handshakeFile)
+                        bridge.ask(text)
+                    }
                 } catch (e: Exception) {
                     // A dead bridge is the normal case, not a crash: the service may simply
                     // not be running. The extension turns this into "start VaultGuard".
@@ -66,6 +71,29 @@ object NativeHost {
             bridge?.close()
         }
     }
+
+    /**
+     * The browser gets the actions the extension needs and no others. The service would
+     * also refuse an unknown action, but "open" is a known one, meant for a second launch
+     * of VaultGuard, and a page's extension has no business popping the vault's window.
+     */
+    fun isRelayable(message: String): Boolean =
+        runCatching { JSONObject(message).optString("action") in BridgeProtocol.RELAYABLE }.getOrDefault(false)
+
+    /**
+     * Asks a running service to open its window. Used by a second launch, which then
+     * exits; nothing else on this side of the socket should need it.
+     *
+     * @return true if a service answered.
+     */
+    fun askRunningServiceToOpen(handshakeFile: File = BridgeServer.defaultHandshakeFile): Boolean = runCatching {
+        val bridge = Bridge.connect(handshakeFile)
+        try {
+            JSONObject(bridge.ask(JSONObject().put("action", BridgeProtocol.Action.OPEN).toString())).optBoolean("ok")
+        } finally {
+            bridge.close()
+        }
+    }.getOrDefault(false)
 
     private fun readLength(input: DataInputStream): Int? {
         val header = ByteArray(4)

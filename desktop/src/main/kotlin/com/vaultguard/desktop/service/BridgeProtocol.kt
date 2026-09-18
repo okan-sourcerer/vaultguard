@@ -37,7 +37,17 @@ object BridgeProtocol {
         const val MATCH = "match"
         const val SECRET = "secret"
         const val LOCK = "lock"
+
+        /**
+         * Bring the tray's window up - unlocking first if need be. Not for the extension:
+         * [NativeHost] refuses to relay it, so only a local process holding the token (a
+         * second launch of VaultGuard itself) can send it. It reads nothing.
+         */
+        const val OPEN = "open"
     }
+
+    /** What a browser may ask through the native host. [Action.OPEN] is deliberately absent. */
+    val RELAYABLE: Set<String> = setOf(Action.STATUS, Action.MATCH, Action.SECRET, Action.LOCK)
 
     fun error(message: String): JSONObject =
         JSONObject().put("ok", false).put("error", message)
@@ -55,9 +65,15 @@ object BridgeProtocol {
         request: JSONObject,
         state: ServiceState,
         credentials: () -> List<Credential>,
-        lock: () -> Unit
+        lock: () -> Unit,
+        open: () -> Unit = {}
     ): JSONObject {
         val action = request.optString("action")
+
+        if (action == Action.OPEN) {
+            open()
+            return ok()
+        }
 
         if (action == Action.STATUS) {
             return ok()

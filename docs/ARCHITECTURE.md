@@ -202,6 +202,25 @@ unsigned downloads; that needs a code-signing certificate, which is a purchase r
 build change. The GitHub Actions release workflow builds all four on the matching runners
 and attaches them, with the Android APK, to a release for each `v*` tag.
 
+### One action: Open
+
+The tray has one primary action and it is reachable from everywhere a person might click:
+the *Open VaultGuard* menu item, a left-click on the icon, a click on any notification, and
+launching the program while it is already running. It ends with the window on screen
+whatever the starting state — unlocked shows it, locked asks for the password first, signed
+out signs in first — so nobody returns to the menu to finish what they started. *Unlock* is
+kept as a separate item for the browser case (let the extension fill, no window wanted)
+and is the only action that does not open one.
+
+Notifications are for what the user did not just do: the service starting (at login) and
+the idle lock. Both open on click. Unlocking, locking, refreshing and signing out notify
+nothing — the window or the menu's status line is the feedback, and a balloon confirming a
+click is noise.
+
+A second launch reaches the first through the bridge socket with an `open` action. The
+native host refuses to relay that action, so a browser extension cannot send it: `open`
+is for a local process holding the token, which is VaultGuard itself.
+
 ### Settings, without a terminal
 
 The tray menu's *Settings...* window covers what `--install-service` and `--install-bridge`
