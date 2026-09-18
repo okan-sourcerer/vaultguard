@@ -119,7 +119,8 @@ class SniFrontendTest {
         val pixmaps = all.getValue("IconPixmap").value as List<*>
         assertEquals(Pixmaps.SIZES, pixmaps.map { (it as Array<*>)[0] })
         val largest = pixmaps.last() as Array<*>
-        assertEquals(48 * 48 * 4, (largest[2] as ByteArray).size)
+        val bytes = largest[2].let { (it as? ByteArray)?.size ?: (it as List<*>).size }
+        assertEquals(48 * 48 * 4, bytes)
         assertEquals(SniFrontend.MENU_PATH, all.getValue("Menu").value.toString())
 
         // The menu.
