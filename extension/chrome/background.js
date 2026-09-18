@@ -110,31 +110,45 @@ function fillForm(username, password) {
     document.querySelectorAll('input[type="password"]')
   ).find(isVisible);
 
-  const candidates = Array.from(
-    document.querySelectorAll(
-      'input[type="text"], input[type="email"], input[type="tel"], input:not([type])'
-    )
-  ).filter(isVisible);
+  // Account fields announce themselves more often than not: type=email, an autocomplete
+  // hint, or a name/id/placeholder with "user", "email", "login" or "account" in it.
+  const looksLikeAccount = (el) =>
+    el.type === "email" ||
+    /^(username|email)$/i.test(el.autocomplete || "") ||
+    /user|email|login|account|mail/i.test(
+      [el.name, el.id, el.placeholder, el.getAttribute("aria-label")].join(" ")
+    );
+
+  const textFieldsIn = (root) =>
+    Array.from(
+      root.querySelectorAll(
+        'input[type="text"], input[type="email"], input[type="tel"], input:not([type])'
+      )
+    ).filter(isVisible);
 
   let usernameField = null;
   if (passwordField) {
-    // The username field is the visible text-ish input closest above the password one,
-    // which handles the common layouts without guessing from names in a dozen languages.
-    const before = candidates.filter(
+    // Inside the password's own form when it has one, so a search box in the page
+    // header is never mistaken for the account field. Prefer a field that says it is
+    // the account; otherwise the nearest one above the password, and only within a
+    // form - guessing across a formless page is how the wrong box gets typed into. A
+    // pre-filled or read-only account field is left alone; only the password is set.
+    const scope = passwordField.form || document;
+    const candidates = textFieldsIn(scope).filter(
       (el) =>
         el.compareDocumentPosition(passwordField) &
         Node.DOCUMENT_POSITION_FOLLOWING
     );
-    usernameField = before.length ? before[before.length - 1] : null;
+    usernameField =
+      candidates.find(looksLikeAccount) ||
+      (passwordField.form && candidates.length ? candidates[candidates.length - 1] : null);
   } else {
     // A two-step login: this page asks for the account and the next one for the
     // password (Google, Microsoft, most banks). Fill the account field alone; the
     // extension is used again on the password page, where the branch above runs
     // with no username field and sets only the password.
-    usernameField =
-      candidates.find((el) => el.type === "email" || el.autocomplete === "username") ||
-      candidates[0] ||
-      null;
+    const candidates = textFieldsIn(document);
+    usernameField = candidates.find(looksLikeAccount) || (candidates.length === 1 ? candidates[0] : null);
     if (!usernameField) return false;
   }
 

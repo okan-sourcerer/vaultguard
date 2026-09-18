@@ -26,19 +26,32 @@
   // phone's autofill merges its contexts the same way (#54).
   const STASH = "vaultguard.account";
 
-  function textCandidates(root) {
+  // For reading, a pre-filled read-only or disabled account field is the best source
+  // there is - it is the account the password is for. (Filling skips such fields.)
+  const isShown = (el) => el && el.offsetParent !== null;
+
+  const looksLikeAccount = (el) =>
+    el.type === "email" ||
+    /^(username|email)$/i.test(el.autocomplete || "") ||
+    /user|email|login|account|mail/i.test([el.name, el.id, el.placeholder, el.getAttribute("aria-label")].join(" "));
+
+  function textCandidates(root, includeReadOnly) {
     return Array.from(
       root.querySelectorAll('input[type="text"], input[type="email"], input[type="tel"], input:not([type])')
-    ).filter(isVisible);
+    ).filter(includeReadOnly ? isShown : isVisible);
   }
 
   function usernameFor(passwordField) {
-    const candidates = textCandidates(passwordField.form || document);
-    const before = candidates.filter(
+    const scope = passwordField.form || document;
+    const before = textCandidates(scope, true).filter(
       (el) => el.compareDocumentPosition(passwordField) & Node.DOCUMENT_POSITION_FOLLOWING
     );
-    const field = before.length ? before[before.length - 1] : null;
-    if (field && field.value.trim()) return field.value.trim();
+    // A field that says it is the account, else the nearest above within the form. With
+    // no form and no such field, do not guess from the whole page.
+    const field =
+      before.find((el) => looksLikeAccount(el) && el.value.trim()) ||
+      (passwordField.form ? before.reverse().find((el) => el.value.trim()) : null);
+    if (field) return field.value.trim();
     try {
       return sessionStorage.getItem(STASH) || "";
     } catch (e) {
@@ -49,9 +62,8 @@
   // The first step of a two-step login: an account field submitted with no password
   // field in sight. Remember the account for the page that follows.
   function stashAccount(root) {
-    const field =
-      textCandidates(root).find((el) => el.type === "email" || el.autocomplete === "username") ||
-      textCandidates(root)[0];
+    const candidates = textCandidates(root, false);
+    const field = candidates.find(looksLikeAccount) || (candidates.length === 1 ? candidates[0] : null);
     const value = field ? field.value.trim() : "";
     if (!value) return;
     try {
