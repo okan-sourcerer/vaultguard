@@ -220,6 +220,17 @@ send it. The JSON is rendered verbatim on the screen before the user presses Sen
 endpoint and key come from `vaultguard.feedbackUrl`/`feedbackKey` (or the
 `VAULTGUARD_FEEDBACK_*` environment) at build time; absent, the entry points are hidden.
 
+## Updates
+
+`UpdateCheck` in `:core` asks GitHub's public releases API for the latest tag and compares
+it with the running version — one unauthenticated GET, no payload about the user. Both
+clients check on demand (desktop also once a day at startup, switchable off in Settings).
+Nothing installs itself: desktop on Windows downloads the `.msi`, verifies it against the
+release's `SHA256SUMS` (which the release workflow attaches), and only then offers to quit
+and run it; elsewhere it opens the release page. Android opens the APK link and the system
+installer upgrades in place because the signing key is the same. Release asset names carry
+no version (`VaultGuard-windows.msi`) so `releases/latest/download/...` links stay valid.
+
 ## Testing notes
 
 - Everything in `:core` is pure JVM by construction — no Robolectric, no android.jar.

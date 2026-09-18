@@ -1,5 +1,7 @@
 package com.vaultguard.desktop.service
 
+import com.vaultguard.app.update.Release
+import com.vaultguard.app.update.UpdateCheck
 import com.vaultguard.desktop.cloud.BakedDefaults
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -33,9 +35,17 @@ import javax.swing.SwingUtilities
  * The work runs off the Swing thread; `reg` and `launchctl` are quick but not instant, and
  * a frozen checkbox reads as a broken one.
  */
-class SettingsDialog {
+class SettingsDialog(
+    private val updater: Updater = Updater(),
+    /** Quits the service; an installer cannot replace a running executable. */
+    private val onQuit: () -> Unit = {}
+) {
 
     private var dialog: JDialog? = null
+
+    /** The last check's answer, shown when the window opens if the startup check found one. */
+    @Volatile
+    var pendingUpdate: Release? = null
 
     fun show() = SwingUtilities.invokeLater {
         dialog?.let { it.toFront(); return@invokeLater }
@@ -123,6 +133,80 @@ class SettingsDialog {
             add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { add(checkButton) })
         }
 
+        val checkAtStartup = JCheckBox("Check for updates when VaultGuard starts", updater.checkAtStartup)
+        val updateStatus = JLabel(" ")
+        val checkNow = JButton("Check now")
+        val install = JButton(if (updater.installableAsset != null) "Install" else "Download").apply { isVisible = false }
+        var available: Release? = null
+
+        fun showUpdate(result: UpdateCheck.Result?) {
+            when (result) {
+                null -> Unit
+                is UpdateCheck.Result.UpToDate -> { updateStatus.text = "Up to date."; install.isVisible = false }
+                is UpdateCheck.Result.Failed -> { updateStatus.text = "Could not check: ${result.reason}"; install.isVisible = false }
+                is UpdateCheck.Result.Available -> {
+                    available = result.release
+                    updateStatus.text = "VaultGuard ${result.release.version} is available."
+                    install.isVisible = true
+                }
+            }
+            dialog?.pack()
+        }
+        pendingUpdate?.let { showUpdate(UpdateCheck.Result.Available(com.vaultguard.app.update.Version.parse(BakedDefaults.version) ?: com.vaultguard.app.update.Version(0, 0, 0), it)) }
+
+        checkAtStartup.addActionListener { updater.checkAtStartup = checkAtStartup.isSelected }
+        checkNow.addActionListener {
+            checkNow.isEnabled = false
+            updateStatus.text = "Checking..."
+            Thread({
+                val result = updater.check()
+                SwingUtilities.invokeLater { showUpdate(result); checkNow.isEnabled = true }
+            }, "vaultguard-update-check").apply { isDaemon = true }.start()
+        }
+        install.addActionListener {
+            val release = available ?: return@addActionListener
+            if (updater.installableAsset == null) {
+                updater.openReleasePage(release)
+                return@addActionListener
+            }
+            install.isEnabled = false
+            Thread({
+                val prepared = updater.prepareInstall(release) { step -> SwingUtilities.invokeLater { updateStatus.text = step } }
+                SwingUtilities.invokeLater {
+                    install.isEnabled = true
+                    when (prepared) {
+                        is Updater.Install.Refused -> {
+                            updateStatus.text = prepared.reason
+                            JOptionPane.showMessageDialog(dialog, prepared.reason, "VaultGuard", JOptionPane.ERROR_MESSAGE)
+                        }
+                        is Updater.Install.Ready -> {
+                            updateStatus.text = "Verified."
+                            val go = JOptionPane.showConfirmDialog(
+                                dialog,
+                                "VaultGuard ${release.version} is downloaded and verified.\n" +
+                                    "VaultGuard will quit and the installer will start.",
+                                "VaultGuard",
+                                JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE
+                            )
+                            if (go == JOptionPane.OK_OPTION) {
+                                runCatching { ProcessBuilder(prepared.command).start() }
+                                    .onSuccess { onQuit() }
+                                    .onFailure { JOptionPane.showMessageDialog(dialog, "Could not start the installer: ${it.message}", "VaultGuard", JOptionPane.ERROR_MESSAGE) }
+                            }
+                        }
+                    }
+                }
+            }, "vaultguard-update-install").apply { isDaemon = true }.start()
+        }
+
+        val updates = section("Updates").apply {
+            add(checkAtStartup)
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 4)).apply {
+                add(checkNow); add(Box.createHorizontalStrut(8)); add(install); add(Box.createHorizontalStrut(8)); add(updateStatus)
+            })
+            add(JLabel("Checks ask github.com for the latest release and send nothing about you."))
+        }
+
         val about = section("This installation").apply {
             add(JLabel("Version ${BakedDefaults.version}"))
             add(JLabel("Firebase project: ${BakedDefaults.value("projectId") ?: "not configured"}"))
@@ -135,6 +219,8 @@ class SettingsDialog {
             add(startup)
             add(Box.createVerticalStrut(12))
             add(browser)
+            add(Box.createVerticalStrut(12))
+            add(updates)
             add(Box.createVerticalStrut(12))
             add(about)
             add(Box.createVerticalStrut(12))

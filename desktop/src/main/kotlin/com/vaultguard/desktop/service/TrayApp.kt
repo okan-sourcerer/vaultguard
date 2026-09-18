@@ -32,7 +32,8 @@ class TrayApp(
     // created when a window is first shown, not when the controller is.
     private val search by lazy { SearchDialog(service, clipboard) }
     private val feedback = FeedbackDialog()
-    private val settings = SettingsDialog()
+    private val updater = Updater(stateDirectory)
+    private val settings = SettingsDialog(updater, onQuit = { quit() })
     private val bridge = BridgeServer(service, handshakeFile = File(stateDirectory, "bridge.json"), onOpen = { open() })
 
     private val worker = Executors.newSingleThreadExecutor { runnable ->
@@ -104,6 +105,16 @@ class TrayApp(
             ServiceState.SIGNED_OUT -> notify("VaultGuard is running", "Click to sign in.")
             ServiceState.LOCKED -> notify("VaultGuard is running", "Click to unlock.")
             ServiceState.UNLOCKED -> Unit
+        }
+
+        // Once a day, quietly. The answer waits in Settings; the balloon says so, and
+        // clicking it opens VaultGuard like any other.
+        worker.submit {
+            val result = runCatching { updater.checkIfDue() }.getOrNull()
+            if (result is com.vaultguard.app.update.UpdateCheck.Result.Available) {
+                settings.pendingUpdate = result.release
+                notify("VaultGuard ${result.release.version} is available", "Install it from Settings.")
+            }
         }
 
         // A fresh install is otherwise a tray icon and nothing else. Once: the marker is

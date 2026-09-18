@@ -26,9 +26,13 @@ import com.vaultguard.app.util.MasterPasswordPolicy
 import com.vaultguard.app.util.PasswordStrengthEvaluator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.vaultguard.app.BuildConfig
+import com.vaultguard.app.update.UpdateCheck
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class VaultStats(
@@ -55,7 +59,12 @@ data class SettingsUiState(
     val vaultStats: VaultStats = VaultStats(),
     val isLoading: Boolean = false,
     val message: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    /** Result of the last "Check for updates"; null until asked. */
+    val updateStatus: String? = null,
+    /** The release page to open when a newer version exists. */
+    val updateUrl: String? = null,
+    val isCheckingForUpdates: Boolean = false
 )
 
 @HiltViewModel
@@ -379,6 +388,31 @@ class SettingsViewModel @Inject constructor(
 
     fun clearMessage() {
         _uiState.value = _uiState.value.copy(message = null, error = null)
+    }
+
+    /**
+     * One GET to GitHub's public releases API, on demand only; nothing about the user or
+     * the vault goes with it. Installing is the browser and the package installer: the
+     * APK is signed with the same key, so Android upgrades in place.
+     */
+    fun onCheckForUpdates() {
+        _uiState.value = _uiState.value.copy(isCheckingForUpdates = true, updateStatus = "Checking...", updateUrl = null)
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { UpdateCheck(BuildConfig.VERSION_NAME).check() }
+            _uiState.value = when (result) {
+                is UpdateCheck.Result.UpToDate -> _uiState.value.copy(
+                    isCheckingForUpdates = false, updateStatus = "Up to date (${result.current})."
+                )
+                is UpdateCheck.Result.Available -> _uiState.value.copy(
+                    isCheckingForUpdates = false,
+                    updateStatus = "VaultGuard ${result.release.version} is available.",
+                    updateUrl = result.release.assets["VaultGuard-android.apk"] ?: result.release.pageUrl
+                )
+                is UpdateCheck.Result.Failed -> _uiState.value.copy(
+                    isCheckingForUpdates = false, updateStatus = "Could not check: ${result.reason}"
+                )
+            }
+        }
     }
 
     fun onLockVault() {

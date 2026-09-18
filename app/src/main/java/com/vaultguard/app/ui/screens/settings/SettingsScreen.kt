@@ -585,10 +585,34 @@ fun SettingsScreen(
                 }
             }
 
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("About", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("VaultGuard ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+                    uiState.updateStatus?.let {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row {
+                        OutlinedButton(
+                            onClick = { viewModel.onCheckForUpdates() },
+                            enabled = !uiState.isCheckingForUpdates
+                        ) { Text("Check for updates") }
+                        uiState.updateUrl?.let { url ->
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(onClick = {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                            }) { Text("Download") }
+                        }
+                    }
+                }
+            }
+
             // Only when the build knows a hub; a button that always fails is worse than none.
             if (BuildConfig.FEEDBACK_KEY.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("About", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 Card(
                     modifier = Modifier
