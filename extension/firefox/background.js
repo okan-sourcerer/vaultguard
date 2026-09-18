@@ -110,22 +110,33 @@ function fillForm(username, password) {
     document.querySelectorAll('input[type="password"]')
   ).find(isVisible);
 
-  if (!passwordField) return false;
-
-  // The username field is the visible text-ish input closest above the password one, which
-  // handles the common layouts without guessing from names in a dozen languages.
   const candidates = Array.from(
     document.querySelectorAll(
       'input[type="text"], input[type="email"], input[type="tel"], input:not([type])'
     )
   ).filter(isVisible);
 
-  const before = candidates.filter(
-    (el) =>
-      el.compareDocumentPosition(passwordField) &
-      Node.DOCUMENT_POSITION_FOLLOWING
-  );
-  const usernameField = before.length ? before[before.length - 1] : null;
+  let usernameField = null;
+  if (passwordField) {
+    // The username field is the visible text-ish input closest above the password one,
+    // which handles the common layouts without guessing from names in a dozen languages.
+    const before = candidates.filter(
+      (el) =>
+        el.compareDocumentPosition(passwordField) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    usernameField = before.length ? before[before.length - 1] : null;
+  } else {
+    // A two-step login: this page asks for the account and the next one for the
+    // password (Google, Microsoft, most banks). Fill the account field alone; the
+    // extension is used again on the password page, where the branch above runs
+    // with no username field and sets only the password.
+    usernameField =
+      candidates.find((el) => el.type === "email" || el.autocomplete === "username") ||
+      candidates[0] ||
+      null;
+    if (!usernameField) return false;
+  }
 
   const set = (el, value) => {
     if (!el || !value) return;
@@ -142,6 +153,6 @@ function fillForm(username, password) {
 
   set(usernameField, username);
   set(passwordField, password);
-  passwordField.focus();
-  return true;
+  (passwordField || usernameField).focus();
+  return passwordField ? "both" : "username";
 }

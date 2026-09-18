@@ -56,7 +56,9 @@ function render(credentials, tabId) {
       if (!result.ok) {
         say(result.error || "Could not fill.");
       } else if (!result.filled) {
-        say("No password field found on this page.");
+        say("No login field found on this page.");
+      } else if (result.filled === "username") {
+        say("Filled the account. Use VaultGuard again on the password page.");
       } else {
         window.close();
       }
