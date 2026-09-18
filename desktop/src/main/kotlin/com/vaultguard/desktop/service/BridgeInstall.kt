@@ -189,6 +189,34 @@ object BridgeInstall {
      * Registering the host is a change to the user's browser configuration, and it is theirs
      * to make knowingly. The command is exact so there is nothing to get wrong.
      */
+    /**
+     * What is registered now, read back from the manifests (and, on Windows, the registry
+     * keys that point at them - a manifest nobody points at registers nothing).
+     */
+    fun status(): Setup.BridgeStatus {
+        val directories = manifestDirectories()
+        val chromeFile = File(directories.getValue("chrome"), "$HOST_NAME.chrome.json")
+        val firefoxFile = File(directories.getValue("firefox"), "$HOST_NAME.firefox.json")
+
+        fun pointedAt(key: String, file: File): Boolean = !isWindows || runCatching {
+            val process = ProcessBuilder("reg", "query", key, "/ve").redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor() == 0 && output.contains(file.absolutePath, ignoreCase = true)
+        }.getOrDefault(false)
+
+        val firefox = firefoxFile.isFile &&
+            pointedAt("HKCU\\Software\\Mozilla\\NativeMessagingHosts\\$HOST_NAME", firefoxFile)
+
+        val chromeId = chromeFile.takeIf { it.isFile }?.let { file ->
+            runCatching {
+                JSONObject(file.readText(Charsets.UTF_8)).optJSONArray("allowed_origins")
+                    ?.optString(0)?.removePrefix("chrome-extension://")?.removeSuffix("/")
+            }.getOrNull()?.takeIf { it.isNotEmpty() }
+        }?.takeIf { pointedAt("HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\$HOST_NAME", chromeFile) }
+
+        return Setup.BridgeStatus(firefox = firefox, chromeExtensionId = chromeId)
+    }
+
     private fun registryInstruction(key: String, manifest: File): String =
         "  reg add \"$key\" /ve /t REG_SZ /d \"${manifest.absolutePath}\" /f"
 }

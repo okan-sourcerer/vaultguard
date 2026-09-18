@@ -202,6 +202,18 @@ unsigned downloads; that needs a code-signing certificate, which is a purchase r
 build change. The GitHub Actions release workflow builds all four on the matching runners
 and attaches them, with the Android APK, to a release for each `v*` tag.
 
+### Settings, without a terminal
+
+The tray menu's *Settings...* window covers what `--install-service` and `--install-bridge`
+do: a checkbox for starting at login, Register buttons for Firefox and Chrome, and a bridge
+check. `Setup` runs the very commands those CLI reports print — through `cmd /c` or
+`sh -c`, so the shell's quoting is the one they were written for — rather than a second
+implementation of the same registry edit. The policy that a persistent change is the user's
+to make knowingly is kept by the checkbox being the user's action; what changed is that the
+window also shows whether the thing is currently on, read back from the Run key and the
+manifests rather than remembered. On the first run of a fresh install the window opens by
+itself, once.
+
 ### Running at login
 
 `--install-service` writes a `.cmd` launcher into `~/.vaultguard` that starts the native

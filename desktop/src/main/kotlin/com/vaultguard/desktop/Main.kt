@@ -43,9 +43,11 @@ your master password. It browses, adds, edits and soft-deletes. Every write is
 checked against the version it fetched, so if your phone changed an entry since,
 the write is refused rather than overwriting it.
 
-Service mode puts a tray icon in the notification area: unlock, refresh, lock,
-sign out, quit. It holds the vault open so other things can use it, and locks
-itself after 15 minutes unused.
+Service mode puts a tray icon in the notification area: unlock, search, refresh,
+lock, sign out, quit. It holds the vault open so other things can use it, and
+locks itself after 15 minutes unused. Its Settings window does what
+--install-service and --install-bridge do, without the terminal; those remain
+for scripts and for seeing the exact commands.
 
 Neither mode keeps a copy of your password. Both derive per operation and let
 KeyDerivation zero the array. The remembered sign-in is sealed under your master

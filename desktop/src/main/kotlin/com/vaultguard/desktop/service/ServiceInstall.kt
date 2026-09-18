@@ -42,8 +42,8 @@ object ServiceInstall {
     /** Where a .vbs from an older install may still be sitting. */
     private val legacyStartupScript: File get() = File(startupDirectory, "VaultGuard.vbs")
 
-    private const val RUN_KEY = """HKCU\Software\Microsoft\Windows\CurrentVersion\Run"""
-    private const val RUN_VALUE = "VaultGuard"
+    const val RUN_KEY = """HKCU\Software\Microsoft\Windows\CurrentVersion\Run"""
+    const val RUN_VALUE = "VaultGuard"
 
     data class Report(
         val lines: List<String>,
@@ -59,10 +59,10 @@ object ServiceInstall {
     /** Where the generated autostart files are kept before the user puts them in place. */
     private val stagingDirectory: File get() = File(home, ".vaultguard")
 
-    private val launchAgentFile: File
+    val launchAgentFile: File
         get() = File(home, "Library/LaunchAgents/${Autostart.LAUNCH_AGENT_LABEL}.plist")
 
-    private val autostartEntryFile: File
+    val autostartEntryFile: File
         get() = File(
             System.getenv("XDG_CONFIG_HOME") ?: File(home, ".config").path,
             "autostart/${Autostart.DESKTOP_ENTRY_NAME}"

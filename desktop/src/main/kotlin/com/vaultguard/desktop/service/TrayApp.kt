@@ -5,6 +5,7 @@ import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.TrayIcon
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.swing.JOptionPane
@@ -30,6 +31,7 @@ class TrayApp(
 
     private val search = SearchDialog(service, clipboard)
     private val feedback = FeedbackDialog()
+    private val settings = SettingsDialog()
 
     private lateinit var trayIcon: TrayIcon
     private val statusItem = MenuItem("Starting...")
@@ -61,6 +63,7 @@ class TrayApp(
             add(statusItem)
             addSeparator()
             add(searchItem)
+            add(MenuItem("Settings...").apply { addActionListener { settings.show() } })
             addSeparator()
             add(unlockItem)
             add(refreshItem)
@@ -97,7 +100,19 @@ class TrayApp(
         // wake the process 60 times as often to learn the same thing.
         ticker.scheduleAtFixedRate({ tick() }, 1, 1, TimeUnit.MINUTES)
 
-        notify("VaultGuard is running", "Right-click the tray icon to unlock.")
+        if (service.state == ServiceState.SIGNED_OUT) {
+            notify("VaultGuard is running", "Right-click the tray icon and choose Sign in...")
+        } else {
+            notify("VaultGuard is running", "Right-click the tray icon to unlock.")
+        }
+
+        // A fresh install is otherwise a tray icon and nothing else. Once: the marker is
+        // the only thing this writes, and Settings is reachable from the menu after.
+        val firstRun = File(Setup.stateDirectory, "first-run-done")
+        if (!firstRun.exists()) {
+            runCatching { firstRun.parentFile.mkdirs(); firstRun.writeText("") }
+            settings.show()
+        }
         return true
     }
 
