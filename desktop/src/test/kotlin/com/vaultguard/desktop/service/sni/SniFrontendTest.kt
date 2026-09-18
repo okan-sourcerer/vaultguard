@@ -114,9 +114,12 @@ class SniFrontendTest {
         val all = itemProperties.GetAll("org.kde.StatusNotifierItem")
         assertEquals("vaultguard", all.getValue("Id").value)
         assertEquals("ApplicationStatus", all.getValue("Category").value)
-        @Suppress("UNCHECKED_CAST")
-        val pixmaps = all.getValue("IconPixmap").value as List<Pixmap>
-        assertEquals(Pixmaps.SIZES, pixmaps.map { it.width })
+        // Inside a Variant the struct arrives untyped: (iiay) is an Object[] of two Integers
+        // and a byte[] - which is exactly what a desktop written in C sees.
+        val pixmaps = all.getValue("IconPixmap").value as List<*>
+        assertEquals(Pixmaps.SIZES, pixmaps.map { (it as Array<*>)[0] })
+        val largest = pixmaps.last() as Array<*>
+        assertEquals(48 * 48 * 4, (largest[2] as ByteArray).size)
         assertEquals(SniFrontend.MENU_PATH, all.getValue("Menu").value.toString())
 
         // The menu.
