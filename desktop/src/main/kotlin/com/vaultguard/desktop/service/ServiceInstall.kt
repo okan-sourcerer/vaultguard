@@ -5,12 +5,16 @@ import java.io.File
 /**
  * Makes the tray service start at login, without a terminal.
  *
- * **The console window.** Gradle's start script runs `java.exe`, which attaches a console
+ * **The console window (Windows).** Gradle's start script runs `java.exe`, which attaches a console
  * and holds it open for the life of the process. `javaw.exe` is the same JVM without one,
  * so the launcher invokes it directly.
  *
  * **Starting it at login.** Through the `HKCU\...\CurrentVersion\Run` key, which runs the
  * `javaw` command line directly — no interpreter, no console, not even briefly.
+ *
+ * **macOS and Linux.** A LaunchAgent plist and an XDG autostart entry respectively, with
+ * the file contents in [Autostart]. Same policy: the file is generated, and the command that
+ * installs it is printed for the user to run.
  *
  * This used to write a `.vbs` into the Startup folder, which is the usual advice and is
  * wrong on a hardened machine: Windows Script Host is disabled by policy on plenty of them
@@ -49,35 +53,41 @@ object ServiceInstall {
         val succeeded: Boolean get() = problems.isEmpty()
     }
 
-    fun install(atLogin: Boolean, installTo: File? = null): Report {
-        if (!isWindows) {
-            return Report(
-                emptyList(),
-                problems = listOf(
-                    "Automatic startup is only wired up for Windows so far.",
-                    "On Linux or macOS, run `vaultguard --service` from your session's",
-                    "autostart (a .desktop file, or a LaunchAgent)."
-                )
-            )
-        }
+    private val isMac: Boolean
+        get() = System.getProperty("os.name").orEmpty().lowercase().contains("mac")
 
-        // Installed from the .msi: the launcher is already somewhere stable, so there is
-        // nothing to locate and nothing to copy.
+    /** Where the generated autostart files are kept before the user puts them in place. */
+    private val stagingDirectory: File get() = File(home, ".vaultguard")
+
+    private val launchAgentFile: File
+        get() = File(home, "Library/LaunchAgents/${Autostart.LAUNCH_AGENT_LABEL}.plist")
+
+    private val autostartEntryFile: File
+        get() = File(
+            System.getenv("XDG_CONFIG_HOME") ?: File(home, ".config").path,
+            "autostart/${Autostart.DESKTOP_ENTRY_NAME}"
+        )
+
+    fun install(atLogin: Boolean, installTo: File? = null): Report {
+        // Installed from the .msi/.dmg/.deb: the launcher is already somewhere stable, so
+        // there is nothing to locate and nothing to copy.
         val installed = InstalledImage.current()
         if (installed != null) {
-            return installFromImage(installed, atLogin, installTo)
+            return if (isWindows) {
+                installFromImage(installed, atLogin, installTo)
+            } else {
+                installUnix(installed.gui, emptyList(), atLogin, installTo)
+            }
+        }
+
+        if (!isWindows) {
+            val appHome = locateAppHome()
+                ?: return Report(emptyList(), problems = notFound)
+            return installUnix(File(appHome, "bin/vaultguard"), listOf("--service"), atLogin, installTo)
         }
 
         val appHome = locateAppHome()
-            ?: return Report(
-                emptyList(),
-                problems = listOf(
-                    "Could not find the installed application.",
-                    "Run `gradlew :desktop:installDist`, then run this from",
-                    "desktop/build/install/vaultguard/bin/vaultguard - or install the",
-                    ".msi and run it as `vaultguard-cli --install-service`."
-                )
-            )
+            ?: return Report(emptyList(), problems = notFound)
 
         var native = locateNativeLauncher(appHome)
 
@@ -150,6 +160,64 @@ object ServiceInstall {
         return Report(lines, commands)
     }
 
+    private val notFound = listOf(
+        "Could not find the installed application.",
+        "Run `gradlew :desktop:installDist`, then run this from",
+        "desktop/build/install/vaultguard/bin/vaultguard - or install the",
+        "release package and run it as `vaultguard-cli --install-service`."
+    )
+
+    /**
+     * macOS and Linux. The launcher is either the installed image's windowed launcher, or
+     * the Gradle start script with `--service`; neither needs a `javaw` equivalent, since
+     * a Unix process has no console unless something gives it one.
+     *
+     * The autostart file is written to `~/.vaultguard` and the one command that puts it in
+     * place is printed, not run - the same policy as the Windows Run key: it changes what
+     * happens at login, and it is the user's to make knowingly.
+     */
+    private fun installUnix(launcher: File, arguments: List<String>, atLogin: Boolean, installTo: File?): Report {
+        if (!launcher.exists()) {
+            return Report(emptyList(), problems = listOf("Launcher not found: ${launcher.path}") + notFound.drop(1))
+        }
+
+        val lines = mutableListOf<String>()
+        val commands = mutableListOf<String>()
+        lines += "Using the launcher: ${launcher.path}"
+        if (installTo != null) {
+            lines += "  --to is a Windows option: here the package manager decides where the app lives."
+        }
+
+        if (!atLogin) {
+            lines += "Not set to run at login. Add --at-login for the command that does that."
+            return Report(lines, commands)
+        }
+
+        val path = launcher.absolutePath
+        if (isMac) {
+            val staged = File(stagingDirectory, launchAgentFile.name)
+            stage(staged, Autostart.launchAgentPlist(path, arguments))
+            lines += "LaunchAgent written to ${staged.path}"
+            lines += "Run the commands below to install it and start it now."
+            commands += "  mkdir -p \"${launchAgentFile.parentFile.path}\""
+            commands += "  cp \"${staged.path}\" \"${launchAgentFile.path}\""
+            commands += "  launchctl bootstrap gui/${"$"}(id -u) \"${launchAgentFile.path}\""
+        } else {
+            val staged = File(stagingDirectory, autostartEntryFile.name)
+            stage(staged, Autostart.desktopEntry(path, arguments))
+            lines += "Autostart entry written to ${staged.path}"
+            lines += "Run the commands below to install it. It takes effect at the next login."
+            commands += "  mkdir -p \"${autostartEntryFile.parentFile.path}\""
+            commands += "  cp \"${staged.path}\" \"${autostartEntryFile.path}\""
+        }
+        return Report(lines, commands)
+    }
+
+    private fun stage(file: File, content: String) {
+        file.parentFile?.mkdirs()
+        file.writeText(content, Charsets.UTF_8)
+    }
+
     private fun installFromImage(image: InstalledImage, atLogin: Boolean, installTo: File?): Report {
         val command = "\"${image.gui.absolutePath}\""
         writeLauncher(command)
@@ -174,6 +242,19 @@ object ServiceInstall {
 
     fun uninstall(): Report {
         val lines = mutableListOf<String>()
+
+        if (!isWindows) {
+            lines += "A service already running is not stopped - use Quit on the tray icon."
+            val commands = if (isMac) {
+                listOf(
+                    "  launchctl bootout gui/${"$"}(id -u) \"${launchAgentFile.path}\"",
+                    "  rm \"${launchAgentFile.path}\""
+                )
+            } else {
+                listOf("  rm \"${autostartEntryFile.path}\"")
+            }
+            return Report(lines, commands)
+        }
 
         if (legacyStartupScript.exists() && legacyStartupScript.delete()) {
             lines += "Removed ${legacyStartupScript.path}"

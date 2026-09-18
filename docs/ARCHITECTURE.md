@@ -219,6 +219,13 @@ leaving a Run key that fails silently at the next login; `--to <dir>` copies the
 somewhere stable first. From an installed copy there is nothing to copy and `--to` is
 ignored.
 
+On macOS the same command generates a LaunchAgent plist, on Linux an XDG autostart
+`.desktop` entry — the text lives in `Autostart`, pure functions with tests, because the
+machines that consume those files are not the one this is developed on and a malformed
+plist fails at login with nothing to say. Both land in `~/.vaultguard` with the `cp` (and
+`launchctl bootstrap`) printed rather than run, for the same reason as the Run key. Neither
+has been exercised on its platform yet.
+
 ### Where the tray will and will not appear
 
 `java.awt.SystemTray` speaks the XEmbed system-tray protocol.
