@@ -37,6 +37,11 @@ dependencies {
     // framework copy, so a consumer has to bring its own.
     implementation(libs.json)
 
+    // A look and feel that is not 2003. Pure Java, MIT, no native code required (it has
+    // optional Windows natives for window decorations, which it loads only if present and
+    // falls back without). Nothing in it touches the vault; it draws widgets.
+    implementation(libs.flatlaf)
+
     testImplementation(libs.junit)
     // FakeSecurePrefs, so a test can drive MasterPasswordManager exactly as the phone does
     // when it publishes a vault config, rather than hand-rolling the key hierarchy.

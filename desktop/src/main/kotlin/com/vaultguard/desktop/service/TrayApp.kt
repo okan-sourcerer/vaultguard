@@ -252,6 +252,19 @@ fun runTrayService() {
 
     // Without this a tray-only process can still be treated as headless and fail to draw.
     System.setProperty("java.awt.headless", "false")
+    Theme.apply()
+
+    if (!SingleInstance.acquire()) {
+        // A window rather than stderr: this launch came from a double-click or the Run
+        // key, and nobody is watching a console.
+        JOptionPane.showMessageDialog(
+            null,
+            "VaultGuard is already running.\nLook for the padlock in the notification area.",
+            "VaultGuard",
+            JOptionPane.INFORMATION_MESSAGE
+        )
+        return
+    }
 
     val service = VaultService(config)
     if (!TrayApp(service).start()) return

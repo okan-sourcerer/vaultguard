@@ -28,6 +28,7 @@ timber = "5.0.1"
 googleGmsGoogleServices = "4.4.4"
 mockk = "1.13.13"
 json = "20240303"
+flatlaf = "3.6"
 javaxInject = "1"
 
 [libraries]
@@ -106,6 +107,7 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 # "not mocked" for every org.json call, so tests touching payload JSON
 # need a genuine implementation on the test classpath.
 json = { group = "org.json", name = "json", version.ref = "json" }
+flatlaf = { group = "com.formdev", name = "flatlaf", version.ref = "flatlaf" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
