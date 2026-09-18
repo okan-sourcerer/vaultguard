@@ -81,12 +81,15 @@ jobs:
           ./gradlew :app:assembleRelease
           -Pvaultguard.version=${{ needs.version.outputs.version }}
           -Pvaultguard.versionCode=${{ github.run_number }}
+      # No version in the file name, so a website can link
+      # .../releases/latest/download/VaultGuard-android.apk and never go stale. The
+      # version is in the release name and inside the package.
       - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk "VaultGuard-${{ needs.version.outputs.version }}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk VaultGuard-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: VaultGuard-*.apk
+          path: VaultGuard-android.apk
 
   desktop:
     needs: [version, test]
@@ -99,10 +102,10 @@ jobs:
           - os: macos-latest
             label: macos
           - os: ubuntu-latest
-            label: linux-deb
+            label: linux
             type: deb
           - os: ubuntu-latest
-            label: linux-rpm
+            label: linux
             type: rpm
     runs-on: ${{ matrix.os }}
     defaults:
@@ -142,16 +145,23 @@ jobs:
           ./gradlew :desktop:packageInstaller
           -Pvaultguard.version=${{ needs.version.outputs.version }}
           ${{ matrix.type && format('-Pvaultguard.installerType={0}', matrix.type) || '' }}
-      - name: List what jpackage produced
-        run: ls -l desktop/build/installer
+      # Same stable naming as the APK: VaultGuard-windows.msi, VaultGuard-macos.dmg,
+      # VaultGuard-linux.deb, VaultGuard-linux.rpm.
+      - name: Name the installer
+        run: |
+          set -e
+          cd desktop/build/installer
+          ls -l
+          for f in *.msi *.dmg *.deb *.rpm; do
+            [ -e "$f" ] || continue
+            ext="${f##*.}"
+            mv "$f" "VaultGuard-${{ matrix.label }}.$ext"
+          done
+          ls -l
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.label }}
-          path: |
-            desktop/build/installer/*.msi
-            desktop/build/installer/*.dmg
-            desktop/build/installer/*.deb
-            desktop/build/installer/*.rpm
+          name: desktop-${{ matrix.label }}-${{ matrix.type || 'native' }}
+          path: desktop/build/installer/VaultGuard-*
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
