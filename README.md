@@ -42,6 +42,7 @@ built by [the release workflow](.github/workflows/release.yml):
 | Windows | [VaultGuard-windows.msi](../../releases/latest/download/VaultGuard-windows.msi) |
 | macOS | [VaultGuard-macos.dmg](../../releases/latest/download/VaultGuard-macos.dmg) |
 | Linux | [VaultGuard-linux.deb](../../releases/latest/download/VaultGuard-linux.deb) · [VaultGuard-linux.rpm](../../releases/latest/download/VaultGuard-linux.rpm) |
+| Browser extension | [vaultguard-chrome.zip](../../releases/latest/download/vaultguard-chrome.zip) · [vaultguard-firefox.zip](../../releases/latest/download/vaultguard-firefox.zip) — unsigned; see [extension/README.md](extension/README.md) |
 
 The desktop installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper
 warn before the first run. On Linux the tray icon needs a StatusNotifier host: KDE, XFCE,
