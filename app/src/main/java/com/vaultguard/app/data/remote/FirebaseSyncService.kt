@@ -214,9 +214,11 @@ class FirebaseSyncService @Inject constructor(
                 // ever read — the poisoning half of #4. Refuse rather than guess.
                 syncPreferences.isEnabled = false
                 throw IllegalStateException(
-                    "This account already holds a different vault. Sync has been turned off to " +
-                        "avoid mixing the two. Export a backup, then either delete the cloud " +
-                        "vault from Settings or import into a fresh install."
+                    "This account already holds a vault under a different master password. " +
+                        "Sync stays off so the two are not mixed. If this device now holds " +
+                        "everything you want to keep, use Delete cloud copy below and turn " +
+                        "sync on again; otherwise bring the cloud vault here as a backup " +
+                        "file first (the desktop client can export one)."
                 )
             }
 

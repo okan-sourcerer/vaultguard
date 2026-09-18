@@ -509,6 +509,17 @@ fun SettingsScreen(
                             enabled = !uiState.isLoading,
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Sign out") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        // Reachable while sync is off, on purpose: when the account holds a
+                        // vault keyed differently (a fresh install under a new master
+                        // password), enabling sync refuses and tells the user to delete the
+                        // cloud copy - which used to be offered only while sync was on.
+                        OutlinedButton(
+                            onClick = { showDeleteCloudDialog = true },
+                            enabled = !uiState.isLoading,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) { Text("Delete cloud copy") }
                     } else {
                         Button(
                             onClick = { viewModel.onSyncNow() },
