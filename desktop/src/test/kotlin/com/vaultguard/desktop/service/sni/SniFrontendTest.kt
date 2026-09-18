@@ -95,6 +95,16 @@ class SniFrontendTest {
 
     private fun <T> CompletableFuture<T>.soon(): T = get(10, TimeUnit.SECONDS)
 
+    /** A dbusmenu row as it arrives through a Variant: `(ia{sv}av)` untyped. */
+    private data class Row(val id: Int, val properties: Map<String, Any?>)
+
+    private fun rows(reply: LayoutReply<UInt32, LayoutItem>): List<Row> = reply.layout.children.map { child ->
+        val struct = child.value as Array<*>
+        @Suppress("UNCHECKED_CAST")
+        val properties = (struct[1] as Map<String, Variant<*>>).mapValues { it.value.value }
+        Row(struct[0] as Int, properties)
+    }
+
     @Test
     fun `registers with the watcher, answers Activate, serves and updates the menu, notifies`() {
         assertTrue(SniFrontend.isAvailable(address))
@@ -125,15 +135,15 @@ class SniFrontendTest {
 
         // The menu.
         val menu = desktop.getRemoteObject(name, SniFrontend.MENU_PATH, DBusMenu::class.java)
-        val layout = menu.GetLayout(0, -1, emptyList())
-        val rows = layout.layout.children.map { it.value as LayoutItem }
-        val labels = rows.map { it.properties["label"]?.value }
+        val rows = rows(menu.GetLayout(0, -1, emptyList()))
+        val labels = rows.map { it.properties["label"] }
         assertTrue(labels.toString(), labels.contains("Open VaultGuard") && labels.contains("Quit"))
         assertEquals("Locked", labels.first())
+        assertTrue(rows.any { it.properties["type"] == "separator" })
 
         // A click on Unlock reaches its action; a click on the disabled Lock does not.
-        val unlockId = rows.first { it.properties["label"]?.value == "Unlock" }.id
-        val lockId = rows.first { it.properties["label"]?.value == "Lock" }.id
+        val unlockId = rows.first { it.properties["label"] == "Unlock" }.id
+        val lockId = rows.first { it.properties["label"] == "Lock" }.id
         menu.Event(unlockId, "clicked", Variant(""), UInt32(0))
         assertEquals("unlock", clicked)
         menu.Event(lockId, "clicked", Variant(""), UInt32(0))
@@ -145,7 +155,7 @@ class SniFrontendTest {
         frontend.render(model.copy(status = "Unlocked - 3 entries", locked = false))
         val revision = updates.poll(10, TimeUnit.SECONDS)
         assertEquals(frontend.layoutRevision, revision)
-        assertEquals("Unlocked - 3 entries", menu.GetLayout(0, -1, emptyList()).layout.children.first().let { (it.value as LayoutItem).properties["label"]?.value })
+        assertEquals("Unlocked - 3 entries", rows(menu.GetLayout(0, -1, emptyList())).first().properties["label"])
 
         // A notification carries a default action, and invoking it is the primary action.
         frontend.notify("VaultGuard is running", "Click to unlock.")
