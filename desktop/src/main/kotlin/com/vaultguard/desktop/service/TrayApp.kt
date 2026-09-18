@@ -1,12 +1,6 @@
 package com.vaultguard.desktop.service
 
 import com.vaultguard.desktop.cloud.DesktopConfig
-import java.awt.MenuItem
-import java.awt.PopupMenu
-import java.awt.SystemTray
-import java.awt.TrayIcon
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
@@ -16,33 +10,30 @@ import javax.swing.JPasswordField
 import javax.swing.SwingUtilities
 
 /**
- * The tray icon: a thin shell over [VaultService].
+ * The controller behind the tray icon - or behind the window that stands in for one.
  *
- * Thin on purpose. `java.awt.SystemTray` speaks the XEmbed tray protocol, which Windows and
- * macOS provide and which GNOME removed in 3.26 — so on the most common Linux desktop this
- * class cannot draw anything, while everything it drives works fine. Keeping all the state
- * and all the decisions in [VaultService] means supporting those desktops later is a
- * replacement for this file, not a rewrite.
+ * Decides what everything means: what the menu contains, what a click does, when to
+ * notify. Draws nothing. A [Frontend] draws; there is one for `java.awt.SystemTray`, one
+ * that is a plain window for desktops with no tray Java can reach, and (planned, see
+ * docs/GNOME-TRAY-PLAN.md) one for StatusNotifierItem. All three render the same
+ * [TrayModel], so they cannot disagree about what is on the menu.
  *
  * Nothing here holds a key, a password or a credential.
  */
 class TrayApp(
     private val service: VaultService,
-    private val clipboard: ClipboardGuard = ClipboardGuard()
+    private val clipboard: ClipboardGuard = ClipboardGuard(),
+    private val frontend: Frontend = Frontend.select(),
+    /** Where the bridge handshake and the first-run marker live; a test points elsewhere. */
+    private val stateDirectory: File = Setup.stateDirectory
 ) {
 
-    private val search = SearchDialog(service, clipboard)
+    // Lazy so a test can drive the controller without a display: Swing components are
+    // created when a window is first shown, not when the controller is.
+    private val search by lazy { SearchDialog(service, clipboard) }
     private val feedback = FeedbackDialog()
     private val settings = SettingsDialog()
-    private val bridge = BridgeServer(service, onOpen = { open() })
-
-    private lateinit var trayIcon: TrayIcon
-    private val statusItem = MenuItem("Starting...")
-    private val openItem = MenuItem("Open VaultGuard")
-    private val unlockItem = MenuItem("Unlock")
-    private val refreshItem = MenuItem("Refresh")
-    private val lockItem = MenuItem("Lock")
-    private val signOutItem = MenuItem("Sign out")
+    private val bridge = BridgeServer(service, handshakeFile = File(stateDirectory, "bridge.json"), onOpen = { open() })
 
     private val worker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vaultguard-tray-worker").apply { isDaemon = true }
@@ -51,63 +42,55 @@ class TrayApp(
         Thread(runnable, "vaultguard-autolock").apply { isDaemon = true }
     }
 
-    fun start(): Boolean {
-        if (!SystemTray.isSupported()) {
-            System.err.println(
-                "This desktop has no system tray that Java can draw into.\n" +
-                    "On GNOME that is expected: the tray protocol Java uses was removed in 3.26.\n" +
-                    "Use `vaultguard --cloud` instead."
-            )
-            return false
-        }
-
-        // One primary action, "Open", reachable from everywhere a person might click:
-        // this item, a left-click on the icon, any notification, and a second launch of
-        // the program. Unlock stays separate for the browser case - let the extension
-        // fill, no window wanted - and is the only action that does not open one.
-        val menu = PopupMenu().apply {
-            statusItem.isEnabled = false
-            add(statusItem)
-            addSeparator()
-            add(openItem)
-            add(MenuItem("Settings...").apply { addActionListener { settings.show() } })
-            addSeparator()
-            add(unlockItem)
-            add(refreshItem)
-            add(lockItem)
-            add(signOutItem)
-            addSeparator()
-            // Only when the build knows a hub; a menu item that always fails is worse than none.
-            if (feedback.isAvailable) {
-                add(MenuItem("Send feedback...").apply { addActionListener { feedback.show() } })
-            }
-            add(MenuItem("Quit").apply { addActionListener { quit() } })
-        }
-
-        trayIcon = TrayIcon(VaultIcon.image(16, locked = true), "VaultGuard", menu).apply {
-            isImageAutoSize = true
-            // Double-click, and a click on a notification balloon, both arrive here.
-            addActionListener { open() }
-            // A single left-click does not; it is a mouse event. Right-click is the menu.
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    if (SwingUtilities.isLeftMouseButton(e) && e.clickCount == 1) open()
+    /**
+     * The menu, as data. One primary action, "Open", reachable from everywhere a person
+     * might click: this item, a left-click on the icon, any notification, and a second
+     * launch of the program. Unlock stays separate for the browser case - let the
+     * extension fill, no window wanted - and is the only action that does not open one.
+     */
+    fun model(): TrayModel {
+        val state = service.state
+        val status = when (state) {
+            ServiceState.SIGNED_OUT -> "Signed out"
+            ServiceState.LOCKED -> "Locked"
+            ServiceState.UNLOCKED -> buildString {
+                append("Unlocked - ").append(service.entryCount).append(" entries")
+                if (service.undecryptableCount > 0) {
+                    append(" (").append(service.undecryptableCount).append(" unreadable)")
                 }
-            })
+            }
         }
+        val entries = buildList {
+            add(MenuEntry.Item("open", "Open VaultGuard") { open() })
+            add(MenuEntry.Item("settings", "Settings...") { settings.show() })
+            add(MenuEntry.Separator)
+            add(MenuEntry.Item(
+                "unlock",
+                if (state == ServiceState.SIGNED_OUT) "Sign in" else "Unlock",
+                enabled = state != ServiceState.UNLOCKED
+            ) { worker.submit { unlock(showWindow = false) } })
+            add(MenuEntry.Item("refresh", "Refresh", enabled = state == ServiceState.UNLOCKED) { worker.submit { refresh() } })
+            add(MenuEntry.Item("lock", "Lock", enabled = state == ServiceState.UNLOCKED) { worker.submit { lockNow() } })
+            add(MenuEntry.Item("signout", "Sign out", enabled = state != ServiceState.SIGNED_OUT) { worker.submit { signOut() } })
+            add(MenuEntry.Separator)
+            // Only when the build knows a hub; a menu item that always fails is worse than none.
+            if (feedback.isAvailable) add(MenuEntry.Item("feedback", "Send feedback...") { feedback.show() })
+            add(MenuEntry.Item("quit", "Quit") { quit() })
+        }
+        return TrayModel(locked = state != ServiceState.UNLOCKED, status = status, entries = entries)
+    }
 
-        openItem.addActionListener { open() }
-        unlockItem.addActionListener { worker.submit { unlock(showWindow = false) } }
-        refreshItem.addActionListener { worker.submit { refresh() } }
-        lockItem.addActionListener { worker.submit { lockNow() } }
-        signOutItem.addActionListener { worker.submit { signOut() } }
-
+    fun start(): Boolean {
         // Started before the icon appears, so a browser that is already open finds the
         // bridge the moment the tray does.
         runCatching { bridge.start() }
             .onFailure { System.err.println("Could not open the browser bridge: ${it.message}") }
 
-        SystemTray.getSystemTray().add(trayIcon)
+        if (!frontend.start(model(), onPrimary = { open() }, onQuit = { quit() })) {
+            System.err.println("Nothing on this desktop can show VaultGuard.")
+            bridge.stop()
+            return false
+        }
         service.onStateChanged = { render() }
         render()
 
@@ -125,7 +108,7 @@ class TrayApp(
 
         // A fresh install is otherwise a tray icon and nothing else. Once: the marker is
         // the only thing this writes, and Settings is reachable from the menu after.
-        val firstRun = File(Setup.stateDirectory, "first-run-done")
+        val firstRun = File(stateDirectory, "first-run-done")
         if (!firstRun.exists()) {
             runCatching { firstRun.parentFile.mkdirs(); firstRun.writeText("") }
             settings.show()
@@ -202,7 +185,7 @@ class TrayApp(
         // copied something else since.
         clipboard.shutdown()
         bridge.stop()
-        runCatching { SystemTray.getSystemTray().remove(trayIcon) }
+        frontend.stop()
         worker.shutdownNow()
         ticker.shutdownNow()
         kotlin.system.exitProcess(0)
@@ -210,36 +193,11 @@ class TrayApp(
 
     // -- Presentation ---------------------------------------------------------------------
 
-    private fun render() = SwingUtilities.invokeLater {
-        val state = service.state
-        statusItem.label = when (state) {
-            ServiceState.SIGNED_OUT -> "Signed out"
-            ServiceState.LOCKED -> "Locked"
-            ServiceState.UNLOCKED -> buildString {
-                append("Unlocked - ").append(service.entryCount).append(" entries")
-                if (service.undecryptableCount > 0) {
-                    append(" (").append(service.undecryptableCount).append(" unreadable)")
-                }
-            }
-        }
+    private fun render() = frontend.render(model())
 
-        unlockItem.label = if (state == ServiceState.SIGNED_OUT) "Sign in" else "Unlock"
-        unlockItem.isEnabled = state != ServiceState.UNLOCKED
-        refreshItem.isEnabled = state == ServiceState.UNLOCKED
-        lockItem.isEnabled = state == ServiceState.UNLOCKED
-        signOutItem.isEnabled = state != ServiceState.SIGNED_OUT
+    private fun status(message: String) = frontend.render(model().copy(status = message))
 
-        trayIcon.image = VaultIcon.image(16, locked = state != ServiceState.UNLOCKED)
-        trayIcon.toolTip = "VaultGuard - ${statusItem.label}"
-    }
-
-    private fun status(message: String) = SwingUtilities.invokeLater {
-        trayIcon.toolTip = "VaultGuard - $message"
-    }
-
-    private fun notify(caption: String, text: String) = SwingUtilities.invokeLater {
-        trayIcon.displayMessage(caption, text, TrayIcon.MessageType.NONE)
-    }
+    private fun notify(caption: String, text: String) = frontend.notify(caption, text)
 
     private fun error(message: String) {
         JOptionPane.showMessageDialog(null, message, "VaultGuard", JOptionPane.ERROR_MESSAGE)

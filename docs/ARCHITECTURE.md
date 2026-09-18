@@ -267,14 +267,19 @@ has been exercised on its platform yet.
 | Windows | Yes |
 | macOS | Yes (menu bar) |
 | KDE, XFCE, Cinnamon, MATE | Yes |
-| GNOME | **No** — the protocol was removed in 3.26 |
+| GNOME | **No icon** — the protocol was removed in 3.26; VaultGuard runs as a window instead |
 
 GNOME is the common Linux default, and its replacement (StatusNotifierItem, over DBus) is
 not something AWT speaks; the AppIndicator extension does not bridge to it either. Nothing
 in `VaultService` depends on any of this, so supporting those desktops is a replacement for
 `TrayApp` — a DBus implementation, or a library like dorkbox SystemTray — rather than a
-rewrite. `SystemTray.isSupported()` is checked at startup and says so plainly instead of
-starting an invisible process.
+rewrite. `SystemTray.isSupported()` is checked at startup; when it is false the `WindowFrontend`
+takes over — a small persistent window with the status line and the same menu as buttons,
+which quits on close. `TrayApp` is the controller and draws nothing; `Frontend` is the
+seam, and `TrayModel` the menu as data that every frontend renders. The StatusNotifierItem
+frontend that puts an icon back on Ubuntu and KDE is planned in
+[GNOME-TRAY-PLAN.md](GNOME-TRAY-PLAN.md). `VAULTGUARD_FRONTEND=window` forces the window
+on a desktop that has a tray, for trying it.
 
 ### Writing from the desktop
 

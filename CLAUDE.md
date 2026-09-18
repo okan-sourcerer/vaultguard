@@ -58,6 +58,7 @@ to the phone, which reads its own local copy. A second client is what found it.
 | `data/remote/` | [docs/SYNC.md](docs/SYNC.md) |
 | Anything at all | [docs/FINDINGS.md](docs/FINDINGS.md) — the defect is probably already known |
 | Planning work | [docs/REMEDIATION-PLAN.md](docs/REMEDIATION-PLAN.md) |
+| The tray on Linux | [docs/GNOME-TRAY-PLAN.md](docs/GNOME-TRAY-PLAN.md) — phases, decisions taken, what is done |
 | Verifying on the device | [docs/USABILITY-PASS.md](docs/USABILITY-PASS.md) — the walkthrough script |
 
 ## The key hierarchy, in one paragraph
