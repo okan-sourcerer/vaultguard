@@ -72,6 +72,10 @@ object BridgeInstall {
      * process knows where it lives; it does not know where it was started from.
      */
     fun locateLauncher(): File? {
+        // Installed from the .msi/.dmg/.deb: the console launcher takes `--native-host`
+        // like the Gradle script does, and the browser spawns it without a window.
+        InstalledImage.current()?.let { return it.cli }
+
         val source = runCatching {
             File(BridgeInstall::class.java.protectionDomain.codeSource.location.toURI())
         }.getOrNull() ?: return null
@@ -88,7 +92,8 @@ object BridgeInstall {
                 problems = listOf(
                     "Could not find the installed launcher.",
                     "Run `gradlew :desktop:installDist`, then run this from",
-                    "desktop/build/install/vaultguard/bin/vaultguard."
+                    "desktop/build/install/vaultguard/bin/vaultguard - or install the",
+                    ".msi and run it as `vaultguard-cli --install-bridge`."
                 )
             )
         }

@@ -163,15 +163,29 @@ it the tray service is `javaw.exe` with a coffee cup in Task Manager. The image 
 stable first; a Run key pointing into a deleted build fails silently at the next login.
 
 ```bash
+./gradlew :desktop:packageInstaller
+```
+
+The installer for the platform the build runs on: `.msi` (needs WiX 3 on the PATH), `.dmg`,
+or `.deb`, under `desktop/build/installer/`. `.github/workflows/release.yml` builds all
+three plus the signed APK for every `v*` tag and attaches them to a GitHub Release. An
+installed copy has two launchers: `VaultGuard` (windowed, the tray) and `vaultguard-cli`
+(console, for every `--` command). Run `vaultguard-cli --install-service --at-login` after
+installing so the Run key points at the installed copy rather than at `build/`.
+
+```bash
 ./gradlew syncExtension packageExtensions
 ```
 
 `extension/shared` is the source; the per-browser directories are copies plus a manifest.
 Run `syncExtension` after editing anything shared. See [extension/README.md](extension/README.md).
 
-The release build is minified and debug-signed so it can be installed locally — the same
-certificate as debug, so it upgrades in place and keeps the vault. Replace the signing
-config with a real keystore before distributing anything.
+The release build is minified. Locally it is debug-signed so it can be installed — the
+same certificate as debug, so it upgrades in place and keeps the vault. In CI it is signed
+with the release keystore from the repository secrets (`VAULTGUARD_KEYSTORE*` in the
+environment). **The two do not upgrade each other**: Android identifies an app by its
+certificate, and the phone that holds the live vault stays on whichever key it was
+installed with.
 
 Anything reached only by reflection or JNI needs a keep rule in `app/proguard-rules.pro`,
 and a missing one cannot fail in a debug build. Check

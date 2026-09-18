@@ -171,15 +171,53 @@ launcher when it exists and falls back to `javaw` when it does not.
 `VaultIcon` draws the padlock, and one drawing serves the tray, the dialog windows and the
 `.ico` the launcher is built with — including writing the `.ico` itself, PNG-per-entry, so
 there is no binary asset in the repository to keep in step. `--write-icon` is the hidden
-entry point the build uses.
+entry point the build uses; given a `.png` path it writes one of those instead, for Linux.
+
+### The installers
+
+`gradlew :desktop:packageInstaller` is the same `jpackage` invocation with a different
+`--type`: `.msi` on Windows, `.dmg` on macOS, `.deb` on Linux. Per-user, with a Start Menu
+entry and an *Apps & features* entry, so it installs and uninstalls the way anything else
+does. Windows Installer recognises a newer MSI as an upgrade through a fixed
+`--win-upgrade-uuid`; changing that constant would make every version install beside the
+last. The MSI needs the WiX 3 toolset on the PATH — jpackage on JDK 21 does not recognise
+WiX 4 — and the build says so by name rather than passing on jpackage's "Can not find WiX
+tools".
+
+The image carries two launchers. `VaultGuard` is a windowed process and starts the tray
+service; `vaultguard-cli` is the same program with a console, for `--install-service`,
+`--install-bridge`, `--cloud` and the rest — a windowed launcher runs them silently and
+shows nothing. The browser wrapper calls the console one too: browsers spawn native hosts
+without a window, so nothing flashes.
+
+Code that needs to know where it is installed asks `InstalledImage`, which looks at the
+executable that started the process rather than at the jar's location. The jar walk
+(`lib/desktop.jar` → the Gradle distribution) is wrong inside an installed image, where the
+jar sits under `app/` and there is no `bin/`; before this, `--install-service` reported
+that the application could not be found, from inside the application.
+
+Nothing signs the installers. Windows SmartScreen and macOS Gatekeeper both warn about
+unsigned downloads; that needs a code-signing certificate, which is a purchase rather than a
+build change. The GitHub Actions release workflow builds all three on the matching runners
+and attaches them, with the Android APK, to a release for each `v*` tag.
 
 ### Running at login
 
-`--install-service` writes a VBScript launcher that starts the JVM through `javaw.exe`
-rather than Gradle's start script. Two different annoyances: `java.exe` attaches a console
-and holds it open, and a `.bat` in the Startup folder flashes one even when what it launches
-has none. `--install-service --at-login` copies the launcher into the Startup folder;
-`--uninstall-service` removes it.
+`--install-service` writes a `.cmd` launcher into `~/.vaultguard` that starts the native
+launcher (or, without one, the JVM through `javaw.exe`) and prints the `reg add` for the
+`HKCU\...\CurrentVersion\Run` key, which runs that command line at login with no console
+— not even briefly, which a `.bat` in the Startup folder cannot manage. The command is
+printed rather than run: it is a persistent change to what happens at login, and the
+same policy applies as to the native-messaging registration.
+
+An earlier version wrote a VBScript into the Startup folder, which is the usual advice
+and fails on any machine where Windows Script Host is disabled by policy. `--install-service`
+removes that file if it finds one.
+
+From the Gradle distribution the launcher lives under `build/`, which `clean` removes,
+leaving a Run key that fails silently at the next login; `--to <dir>` copies the image
+somewhere stable first. From an installed copy there is nothing to copy and `--to` is
+ignored.
 
 ### Where the tray will and will not appear
 

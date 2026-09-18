@@ -76,6 +76,17 @@ object VaultIcon {
         listOf(16, 32, 48, 64, 128).map { image(it, locked) }
 
     /**
+     * Writes a single PNG, for the platforms whose packager wants one (Linux).
+     *
+     * 512 rather than the largest `.ico` entry: desktop environments scale the launcher
+     * icon up for the application grid, and a small source goes blurry there.
+     */
+    fun writePng(target: File, size: Int = 512) {
+        target.parentFile?.mkdirs()
+        ImageIO.write(image(size), "png", target)
+    }
+
+    /**
      * Writes a Windows `.ico`.
      *
      * Each entry is a PNG rather than a device-independent bitmap. Vista onwards reads PNG

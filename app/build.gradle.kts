@@ -16,10 +16,27 @@ android {
         applicationId = "com.vaultguard.app"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // The release workflow passes both: the tag for the name, the run number for the
+        // code, so every CI build is newer than the last whatever the tag says.
+        versionCode = (findProperty("vaultguard.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("vaultguard.version") as String?) ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release signing material comes from the environment and is never on disk in the
+    // repository: the workflow writes the keystore from a secret and points these at it.
+    // Absent, release builds fall back to the debug key below so a minified build can
+    // still be put on the owner's phone - which was signed with that key and would
+    // refuse an upgrade signed with any other (see the note on the release block).
+    val releaseKeystore = System.getenv("VAULTGUARD_KEYSTORE")?.let(::file)?.takeIf { it.isFile }
+    if (releaseKeystore != null) {
+        signingConfigs.create("release") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("VAULTGUARD_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("VAULTGUARD_KEY_ALIAS")
+            keyPassword = System.getenv("VAULTGUARD_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
@@ -31,14 +48,16 @@ android {
                 "proguard-rules.pro"
             )
 
-            // Signed with the debug key so a minified build can actually be installed and
-            // exercised. R8 breakage — a missing keep rule for a reflectively-loaded class,
-            // say — cannot be found any other way: it never reproduces in a debug build,
-            // and an unsigned APK cannot be installed to try.
+            // Locally, signed with the debug key so a minified build can actually be
+            // installed and exercised. R8 breakage — a missing keep rule for a
+            // reflectively-loaded class, say — cannot be found any other way: it never
+            // reproduces in a debug build, and an unsigned APK cannot be installed to try.
             //
-            // BEFORE DISTRIBUTING ANYTHING: replace this with a real keystore. A
-            // debug-signed release is fine on your own device and nowhere else.
-            signingConfig = signingConfigs.getByName("debug")
+            // In CI, signed with the release keystore. Android identifies an app by its
+            // signing certificate, so a CI-built APK will not install over a debug-signed
+            // one, and vice versa. The phone that already holds the vault stays on the key
+            // it was installed with; never uninstall to switch (CLAUDE.md, "Commands").
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

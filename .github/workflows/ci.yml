@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# The Android module cannot configure without google-services.json (the Google Services
+# plugin refuses), so even unit tests need the file. It is never committed (#43); the
+# secret holds it base64-encoded.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Write google-services.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
+      - name: Unit tests (core, desktop, app)
+        run: ./gradlew test :app:testDebugUnitTest
+      - name: Sync the extension and check nothing drifted
+        run: |
+          ./gradlew syncExtension
+          git diff --exit-code -- extension/
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/

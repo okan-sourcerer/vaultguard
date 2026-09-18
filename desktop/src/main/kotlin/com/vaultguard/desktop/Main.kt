@@ -66,7 +66,11 @@ fun main(args: Array<String>) {
         // uses. Not listed in the usage text; nobody needs to run this by hand.
         "--write-icon" -> {
             val target = File(args.getOrNull(1) ?: "vaultguard.ico")
-            VaultIcon.writeIco(target)
+            if (target.extension.equals("png", ignoreCase = true)) {
+                VaultIcon.writePng(target)
+            } else {
+                VaultIcon.writeIco(target)
+            }
             println("Wrote ${target.absolutePath}")
         }
         "--install-bridge" -> installBridge(args.getOrNull(1))

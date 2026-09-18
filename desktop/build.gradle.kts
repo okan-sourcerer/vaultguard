@@ -50,25 +50,115 @@ dependencies {
  * which is a poor look for a thing holding your passwords open. `jpackage` ships with the
  * JDK, so this needs no tooling that is not already here.
  *
- * `app-image` rather than an installer: it produces a directory that can be run in place or
- * copied, and nothing has to be installed to try it.
+ * Two tasks share one argument list:
+ *
+ * - `packageApp` — an `app-image`: a directory that can be run in place or copied, and
+ *   nothing has to be installed to try it. What `--install-service --to` copies.
+ * - `packageInstaller` — what a person downloads: an `.msi` on Windows, a `.dmg` on macOS,
+ *   a `.deb` on Linux. The MSI needs the WiX 3 toolset on the PATH; the other two need
+ *   nothing beyond the JDK. Per user, with a Start Menu entry and an Apps & features
+ *   entry so it can be removed the ordinary way.
+ *
+ * The image carries two launchers. `VaultGuard` is a windowed process — no console — and
+ * starts the tray service when double-clicked. `vaultguard-cli` is the same program with a
+ * console attached, for `--install-service`, `--cloud` and the rest; a windowed launcher
+ * would run them silently and show nothing. It is also what the native-messaging wrapper
+ * calls: browsers spawn hosts without a console window, so nothing flashes.
+ *
+ * Passed as `-Pvaultguard.version=1.2.3` by the release workflow; MSI wants three numbers.
  */
+val appVersion: String = (findProperty("vaultguard.version") as String?) ?: "1.0.0"
+
+// Constant for the life of the product. Windows Installer uses it to recognise a newer
+// MSI as an upgrade of the installed one and replace it in place; change it and every
+// version installs beside the last.
+val windowsUpgradeUuid = "ce432b49-ce4f-46de-a8d9-8f9fd0d2f94d"
+
+val os: org.gradle.internal.os.OperatingSystem = org.gradle.internal.os.OperatingSystem.current()
+
+// jpackage wants the icon in the platform's own format. The `.ico` is drawn by the app
+// itself; macOS would need an `.icns`, which nothing here writes, so it takes the default.
+val iconFile: File? = when {
+    os.isWindows -> layout.buildDirectory.file("vaultguard.ico").get().asFile
+    os.isLinux -> layout.buildDirectory.file("vaultguard.png").get().asFile
+    else -> null
+}
+
 val writeIcon by tasks.registering(JavaExec::class) {
     description = "Generates the launcher icon from the same drawing the tray uses."
     dependsOn(tasks.named("installDist"))
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.vaultguard.desktop.MainKt")
-    args = listOf("--write-icon", layout.buildDirectory.file("vaultguard.ico").get().asFile.absolutePath)
+    onlyIf { iconFile != null }
+    args = listOf("--write-icon", (iconFile ?: File("unused")).absolutePath)
+}
+
+val cliLauncherProperties by tasks.registering {
+    description = "Writes the jpackage properties for the console launcher."
+    val file = layout.buildDirectory.file("vaultguard-cli.properties")
+    outputs.file(file)
+    doLast {
+        file.get().asFile.writeText(
+            listOf(
+                // Without an explicit value the launcher inherits the main one's
+                // `--service`, and a console-attached copy of the tray is not the point.
+                "arguments=--help",
+                "win-console=true",
+                ""
+            ).joinToString("\n")
+        )
+    }
+}
+
+fun jpackageArguments(type: String, dest: File): List<String> {
+    val installDir = layout.buildDirectory.dir("install/vaultguard").get().asFile
+    val common = listOf(
+        "${System.getProperty("java.home")}/bin/jpackage",
+        "--type", type,
+        "--name", "VaultGuard",
+        "--app-version", appVersion,
+        "--vendor", "VaultGuard",
+        "--description", "VaultGuard password vault",
+        "--input", "$installDir/lib",
+        "--main-jar", "desktop.jar",
+        "--main-class", "com.vaultguard.desktop.MainKt",
+        // The tray service is the only reason to double-click this.
+        "--arguments", "--service",
+        "--add-launcher",
+        "vaultguard-cli=${layout.buildDirectory.file("vaultguard-cli.properties").get().asFile.absolutePath}",
+        "--dest", dest.absolutePath
+    )
+    val icon = iconFile?.let { listOf("--icon", it.absolutePath) } ?: emptyList()
+    val platform = when {
+        type == "app-image" -> emptyList()
+        os.isWindows -> listOf(
+            "--win-per-user-install",
+            "--win-dir-chooser",
+            "--win-menu",
+            "--win-menu-group", "VaultGuard",
+            "--win-shortcut",
+            "--win-upgrade-uuid", windowsUpgradeUuid
+        )
+        os.isMacOsX -> listOf(
+            "--mac-package-identifier", "com.vaultguard.desktop",
+            "--mac-package-name", "VaultGuard"
+        )
+        else -> listOf(
+            "--linux-package-name", "vaultguard",
+            "--linux-shortcut",
+            "--linux-menu-group", "Utility",
+            "--linux-app-category", "utils"
+        )
+    }
+    return common + icon + platform
 }
 
 val packageApp by tasks.registering(Exec::class) {
-    description = "Builds VaultGuard.exe with jpackage."
+    description = "Builds the VaultGuard app image with jpackage."
     group = "distribution"
-    dependsOn(tasks.named("installDist"), writeIcon)
+    dependsOn(tasks.named("installDist"), writeIcon, cliLauncherProperties)
 
-    val installDir = layout.buildDirectory.dir("install/vaultguard").get().asFile
     val outputDir = layout.buildDirectory.dir("native").get().asFile
-    val icon = layout.buildDirectory.file("vaultguard.ico").get().asFile
 
     doFirst {
         val image = outputDir.resolve("VaultGuard")
@@ -96,21 +186,37 @@ val packageApp by tasks.registering(Exec::class) {
         outputDir.mkdirs()
     }
 
-    commandLine(
-        "${System.getProperty("java.home")}/bin/jpackage",
-        "--type", "app-image",
-        "--name", "VaultGuard",
-        "--app-version", "1.0.0",
-        "--vendor", "VaultGuard",
-        "--description", "VaultGuard password vault",
-        "--input", "$installDir/lib",
-        "--main-jar", "desktop.jar",
-        "--main-class", "com.vaultguard.desktop.MainKt",
-        "--icon", icon.absolutePath,
-        // The tray service is the only reason to double-click this.
-        "--arguments", "--service",
-        "--dest", outputDir.absolutePath
-    )
+    commandLine(jpackageArguments("app-image", outputDir))
+}
+
+val packageInstaller by tasks.registering(Exec::class) {
+    description = "Builds the installer for this platform (msi, dmg or deb) with jpackage."
+    group = "distribution"
+    dependsOn(tasks.named("installDist"), writeIcon, cliLauncherProperties)
+
+    val outputDir = layout.buildDirectory.dir("installer").get().asFile
+    val type = when {
+        os.isWindows -> "msi"
+        os.isMacOsX -> "dmg"
+        else -> "deb"
+    }
+
+    doFirst {
+        outputDir.deleteRecursively()
+        outputDir.mkdirs()
+        // jpackage's own message when WiX is missing is "Can not find WiX tools", with no
+        // hint of what to install. Checked first, and named.
+        if (type == "msi" && System.getenv("PATH").orEmpty().split(File.pathSeparator)
+                .none { File(it, "light.exe").exists() && File(it, "candle.exe").exists() }
+        ) {
+            throw GradleException(
+                "Building an .msi needs the WiX 3 toolset (candle.exe and light.exe) on the " +
+                    "PATH, and it is not there. Install WiX 3.14 and add its bin directory."
+            )
+        }
+    }
+
+    commandLine(jpackageArguments(type, outputDir))
 }
 
 /**

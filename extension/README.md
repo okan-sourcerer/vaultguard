@@ -44,7 +44,8 @@ capability lives on the side a web page cannot reach.
 
 ## Installing
 
-1. Build and start the service:
+1. Build and start the service — or install the `.msi`/`.dmg`/`.deb` from a release, in
+   which case `vaultguard-cli` in the install directory stands in for `vaultguard` below:
 
    ```
    gradlew :desktop:installDist

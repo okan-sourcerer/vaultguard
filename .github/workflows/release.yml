@@ -1,0 +1,144 @@
+name: Release
+
+# Builds every installable: the Android APK, and a desktop installer per platform.
+#
+# Push a tag `v1.2.3` and a GitHub Release is created with all of them attached; run it by
+# hand for a build with no release, to try the installers.
+#
+# Secrets used:
+#   GOOGLE_SERVICES_JSON        app/google-services.json, base64
+#   ANDROID_KEYSTORE            the release keystore (.jks), base64
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#
+# Nothing here signs the desktop installers. Windows SmartScreen and macOS Gatekeeper will
+# both warn about them until a code-signing certificate exists; that is a purchase, not a
+# workflow change.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            # MSI and Android both want numbers; a manual run gets a 0.0.N that is
+            # obviously not a release.
+            echo "version=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
+      - run: ./gradlew test :app:testDebugUnitTest
+
+  android:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - run: echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
+      - name: Write the release keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+      - name: Build the signed release APK
+        env:
+          VAULTGUARD_KEYSTORE: ${{ runner.temp }}/release.jks
+          VAULTGUARD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VAULTGUARD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          VAULTGUARD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >
+          ./gradlew :app:assembleRelease
+          -Pvaultguard.version=${{ needs.version.outputs.version }}
+          -Pvaultguard.versionCode=${{ github.run_number }}
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "VaultGuard-${{ needs.version.outputs.version }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: VaultGuard-*.apk
+
+  desktop:
+    needs: [version, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+          - os: macos-latest
+            label: macos
+          - os: ubuntu-latest
+            label: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      # jpackage on JDK 21 builds MSIs with WiX 3 (4 and later are not recognised until
+      # JDK 24). The runner image ships it; the PATH does not include it.
+      - name: Put WiX 3 on the PATH
+        if: runner.os == 'Windows'
+        run: |
+          if [ -d "/c/Program Files (x86)/WiX Toolset v3.14/bin" ]; then
+            echo "/c/Program Files (x86)/WiX Toolset v3.14/bin" >> "$GITHUB_PATH"
+          else
+            choco install wixtoolset --version 3.14.1 -y --no-progress
+            echo "/c/Program Files (x86)/WiX Toolset v3.14/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Build the installer
+        run: ./gradlew :desktop:packageInstaller -Pvaultguard.version=${{ needs.version.outputs.version }}
+      - name: List what jpackage produced
+        run: ls -l desktop/build/installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.label }}
+          path: |
+            desktop/build/installer/*.msi
+            desktop/build/installer/*.dmg
+            desktop/build/installer/*.deb
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: VaultGuard ${{ needs.version.outputs.version }}
+          generate_release_notes: true
+          files: dist/*

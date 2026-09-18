@@ -61,13 +61,21 @@ object ServiceInstall {
             )
         }
 
+        // Installed from the .msi: the launcher is already somewhere stable, so there is
+        // nothing to locate and nothing to copy.
+        val installed = InstalledImage.current()
+        if (installed != null) {
+            return installFromImage(installed, atLogin, installTo)
+        }
+
         val appHome = locateAppHome()
             ?: return Report(
                 emptyList(),
                 problems = listOf(
                     "Could not find the installed application.",
                     "Run `gradlew :desktop:installDist`, then run this from",
-                    "desktop/build/install/vaultguard/bin/vaultguard."
+                    "desktop/build/install/vaultguard/bin/vaultguard - or install the",
+                    ".msi and run it as `vaultguard-cli --install-service`."
                 )
             )
 
@@ -139,6 +147,28 @@ object ServiceInstall {
             lines += "  Windows Script Host, which is disabled on this machine."
         }
 
+        return Report(lines, commands)
+    }
+
+    private fun installFromImage(image: InstalledImage, atLogin: Boolean, installTo: File?): Report {
+        val command = "\"${image.gui.absolutePath}\""
+        writeLauncher(command)
+
+        val lines = mutableListOf<String>()
+        lines += "Using the installed launcher: ${image.gui.path}"
+        if (installTo != null) {
+            lines += "  --to ignored: an installed copy is already somewhere `clean` cannot reach."
+        }
+        lines += "Launcher: ${launcherFile.path}"
+        lines += "  Double-click it to start the service now, with no window left behind."
+
+        val commands = mutableListOf<String>()
+        if (atLogin) {
+            commands += "  reg add \"$RUN_KEY\" /v $RUN_VALUE /t REG_SZ /d \"${escapeForCommandLine(command)}\" /f"
+            lines += "Run the command below to start it at every login."
+        } else {
+            lines += "Not set to run at login. Add --at-login for the command that does that."
+        }
         return Report(lines, commands)
     }
 
