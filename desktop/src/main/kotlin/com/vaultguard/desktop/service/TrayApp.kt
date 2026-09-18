@@ -34,7 +34,15 @@ class TrayApp(
     private val feedback = FeedbackDialog()
     private val updater = Updater(stateDirectory)
     private val settings = SettingsDialog(updater, onQuit = { quit() })
-    private val bridge = BridgeServer(service, handshakeFile = File(stateDirectory, "bridge.json"), onOpen = { open() })
+    private val capture by lazy { CaptureDialog(service, onSaved = { render() }) }
+    private val bridge = BridgeServer(
+        service,
+        handshakeFile = File(stateDirectory, "bridge.json"),
+        onOpen = { open() },
+        // Decided and shown off the bridge thread; the browser has its acknowledgement
+        // already and is not waiting on the user.
+        onCapture = { c -> worker.submit { capture.offer(c.host, c.username, c.password) } }
+    )
 
     private val worker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "vaultguard-tray-worker").apply { isDaemon = true }

@@ -95,10 +95,10 @@ saying that it collects nothing. The Firefox manifest declares:
 ```
 
 That is accurate rather than convenient. The extension reads the active tab's URL to match
-against, receives a name and username list, and pushes one password into one form — all of
-it between the browser and a process on the same machine. Nothing is transmitted anywhere,
-so there is no category to declare. `"none"` is a terminal value and cannot be combined
-with one.
+against, receives a name and username list, pushes one password into one form, and hands a
+login you submitted to the desktop service — all of it between the browser and a process on
+the same machine. Nothing is transmitted anywhere, so there is no category to declare.
+`"none"` is a terminal value and cannot be combined with one.
 
 The declaration pushes `strict_min_version` to 140.0, since older Firefox does not
 understand the key.
@@ -148,16 +148,26 @@ After changing anything shared:
 gradlew syncExtension
 ```
 
-## It does not detect login pages
+## Saving a login you type
 
-Deliberately, for now. There is no content script, nothing watches the DOM, and no icon
-appears in a password field. You click the extension; it matches on the tab's host and
-offers what it has. Field detection happens only at the moment you pick an entry, inside
-the page, and only then.
+Since 1.1.0 a content script runs on every http(s) page, and it exists for one reason: to
+notice a login being submitted. On a form submit, Enter in a password field, or a click on
+a submit-shaped button next to one, it reads the visible password field and the text field
+nearest above it and sends the pair to the background worker, which adds the **tab's** URL
+(never the page's word for it) and hands the three to the desktop service.
 
-That means it cannot tell you a page *has* a login form — but it also means no script of
-this extension's runs on any page you visit until you ask for it. Detection is a worthwhile
-next step; it is not free, and it was not the first thing to build.
+The desktop decides, with the same `SaveDecision` the phone's autofill uses: already saved,
+nothing appears; a changed password, "Update?"; the same account saved for another site,
+"Add this site to it?"; otherwise "Save?". The question is asked in a VaultGuard window on
+the desktop, and the browser learns nothing of the answer. *Not now* is remembered for
+the host until the service restarts.
+
+What the content script does **not** do: it keeps nothing between events, sends nothing
+while you type, does not read the URL, and does not detect or decorate login forms —
+there is still no icon in password fields. Filling is still something you start from the
+extension's button. The permission the browser will show at install ("read and change
+data on all websites") is what a content script on every page costs; the script is 90
+lines in `shared/content.js` and can be read in a minute.
 
 ## Diagnosing
 

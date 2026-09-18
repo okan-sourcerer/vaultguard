@@ -39,6 +39,13 @@ object BridgeProtocol {
         const val LOCK = "lock"
 
         /**
+         * A login the extension saw being submitted. The service decides whether it is
+         * new, changed, or already known, and asks the user in its own window; the
+         * extension gets an acknowledgement and nothing else - never what was decided.
+         */
+        const val SAVE = "save"
+
+        /**
          * Bring the tray's window up - unlocking first if need be. Not for the extension:
          * [NativeHost] refuses to relay it, so only a local process holding the token (a
          * second launch of VaultGuard itself) can send it. It reads nothing.
@@ -47,7 +54,7 @@ object BridgeProtocol {
     }
 
     /** What a browser may ask through the native host. [Action.OPEN] is deliberately absent. */
-    val RELAYABLE: Set<String> = setOf(Action.STATUS, Action.MATCH, Action.SECRET, Action.LOCK)
+    val RELAYABLE: Set<String> = setOf(Action.STATUS, Action.MATCH, Action.SECRET, Action.LOCK, Action.SAVE)
 
     fun error(message: String): JSONObject =
         JSONObject().put("ok", false).put("error", message)
@@ -66,7 +73,8 @@ object BridgeProtocol {
         state: ServiceState,
         credentials: () -> List<Credential>,
         lock: () -> Unit,
-        open: () -> Unit = {}
+        open: () -> Unit = {},
+        capture: (Capture) -> Unit = {}
     ): JSONObject {
         val action = request.optString("action")
 
@@ -90,6 +98,16 @@ object BridgeProtocol {
         return when (action) {
             Action.LOCK -> {
                 lock()
+                ok()
+            }
+
+            Action.SAVE -> {
+                val url = request.optString("url").takeIf { it.isNotEmpty() }
+                    ?: return error("A save needs a url.")
+                val host = hostOf(url) ?: return error("That url has no host.")
+                val password = request.optString("password")
+                if (password.isEmpty()) return error("A save needs a password.")
+                capture(Capture(host, request.optString("username"), password))
                 ok()
             }
 
@@ -128,6 +146,9 @@ object BridgeProtocol {
             else -> error("Unknown action: $action")
         }
     }
+
+    /** A submitted login, as the tray receives it. The host is the tab's, never the page's claim. */
+    data class Capture(val host: String, val username: String, val password: String)
 
     /** Everything the extension needs to render a chooser, and nothing more. */
     private fun summaryOf(credential: Credential): JSONObject = JSONObject()

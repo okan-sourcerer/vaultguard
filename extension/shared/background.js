@@ -53,11 +53,11 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  handle(message).then(sendResponse);
+  handle(message, sender).then(sendResponse);
   return true; // keep the channel open for the async reply
 });
 
-async function handle(message) {
+async function handle(message, sender) {
   switch (message && message.type) {
     case "status":
       return ask({ action: "status" });
@@ -83,6 +83,15 @@ async function handle(message) {
 
     case "lock":
       return ask({ action: "lock" });
+
+    case "capture": {
+      // A login the content script saw being submitted. The URL is the tab's, read here,
+      // for the same reason as "match": the page does not get to say where it is. The
+      // desktop decides whether anything is worth asking about and asks there.
+      const url = sender && sender.tab && sender.tab.url;
+      if (!url || !/^https?:/i.test(url)) return { ok: false, error: "No page." };
+      return ask({ action: "save", url, username: message.username || "", password: message.password || "" });
+    }
 
     default:
       return { ok: false, error: "Unknown request." };

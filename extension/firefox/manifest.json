@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VaultGuard",
-  "version": "1.0.1",
-  "description": "Fills passwords from your VaultGuard vault, via the VaultGuard desktop service.",
+  "version": "1.1.0",
+  "description": "Fills and saves passwords with your VaultGuard vault, via the VaultGuard desktop service.",
   "permissions": [
     "nativeMessaging",
     "activeTab",
@@ -29,5 +29,18 @@
         ]
       }
     }
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
 }

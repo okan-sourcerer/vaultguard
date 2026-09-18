@@ -47,7 +47,9 @@ class BridgeServer(
     private val handshakeFile: File = defaultHandshakeFile,
     private val onWarn: (String) -> Unit = {},
     /** The tray's primary action; see [BridgeProtocol.Action.OPEN]. */
-    private val onOpen: () -> Unit = {}
+    private val onOpen: () -> Unit = {},
+    /** A login the browser saw submitted; see [BridgeProtocol.Action.SAVE]. */
+    private val onCapture: (BridgeProtocol.Capture) -> Unit = {}
 ) {
     companion object {
         val defaultHandshakeFile: File
@@ -143,7 +145,8 @@ class BridgeServer(
                         state = service.state,
                         credentials = { service.credentials() },
                         lock = { service.lock() },
-                        open = onOpen
+                        open = onOpen,
+                        capture = onCapture
                     )
                 )
             }

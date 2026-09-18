@@ -221,6 +221,16 @@ A second launch reaches the first through the bridge socket with an `open` actio
 native host refuses to relay that action, so a browser extension cannot send it: `open`
 is for a local process holding the token, which is VaultGuard itself.
 
+### A login typed in the browser
+
+The extension's content script reports a submitted login to the tray over the bridge's
+`save` action, with the host taken from the tab. `CaptureDialog` runs it through
+`SaveDecision` — the same object the phone's autofill uses, now in `:core` — against the
+open vault and asks only when there is something to ask: update a changed password, add
+the site to an entry that already holds this account, or save a new one. The browser gets
+an acknowledgement and never the decision. A locked vault refuses the action, so nothing
+is buffered for later.
+
 ### Settings, without a terminal
 
 The tray menu's *Settings...* window covers what `--install-service` and `--install-bridge`

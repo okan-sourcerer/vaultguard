@@ -104,7 +104,9 @@ expected value to make it pass.
 6. **The autofill package is a second front door.** `VaultAutofillService` and
    `AutofillAuthActivity` decrypt independently of `CredentialRepository`. They share
    `CredentialMatcher` and `FieldClassifier` — keep it that way; they had drifted apart
-   before, and the looser copy guarded the more sensitive path.
+   before, and the looser copy guarded the more sensitive path. `CredentialMatcher` and
+   `SaveDecision` live in `:core` because the desktop's browser capture makes the same
+   two decisions; there is one of each.
 7. **A backup that silently omits entries is worse than no backup.** Both exports refuse
    to run if any row failed to decrypt.
 8. Match the surrounding code's style. Idiomatic Compose + Hilt with constructor injection
