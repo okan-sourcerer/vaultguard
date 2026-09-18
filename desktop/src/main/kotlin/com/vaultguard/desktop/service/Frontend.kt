@@ -1,5 +1,6 @@
 package com.vaultguard.desktop.service
 
+import com.vaultguard.desktop.service.sni.SniFrontend
 import java.awt.SystemTray
 
 /**
@@ -63,9 +64,17 @@ interface Frontend {
          * what remains on GNOME without the AppIndicator extension.
          */
         fun select(): Frontend = when (System.getenv("VAULTGUARD_FRONTEND")?.lowercase()) {
-            // For trying the fallback on a desktop that has a tray; not documented to users.
+            // For trying one on a desktop that would pick another; not documented to users.
             "window" -> WindowFrontend()
-            else -> if (SystemTray.isSupported()) AwtTrayFrontend() else WindowFrontend()
+            "sni" -> SniFrontend()
+            "awt" -> AwtTrayFrontend()
+            else -> when {
+                // On Linux, a StatusNotifierWatcher means the desktop wants SNI even where
+                // AWT's XEmbed would also draw something; SNI is the one GNOME shows.
+                SniFrontend.isAvailable() -> SniFrontend()
+                SystemTray.isSupported() -> AwtTrayFrontend()
+                else -> WindowFrontend()
+            }
         }
     }
 }

@@ -260,26 +260,24 @@ has been exercised on its platform yet.
 
 ### Where the tray will and will not appear
 
-`java.awt.SystemTray` speaks the XEmbed system-tray protocol.
+`Frontend.select()` picks the first of three that can draw on this desktop:
 
-| Platform | Works |
-| --- | --- |
-| Windows | Yes |
-| macOS | Yes (menu bar) |
-| KDE, XFCE, Cinnamon, MATE | Yes |
-| GNOME | **No icon** — the protocol was removed in 3.26; VaultGuard runs as a window instead |
+| Platform | Frontend | Icon |
+| --- | --- | --- |
+| Windows | AWT (`java.awt.SystemTray`, XEmbed) | Yes |
+| macOS | AWT | Yes (menu bar) |
+| KDE, XFCE, Cinnamon, MATE | StatusNotifierItem over DBus (`service/sni/`) | Yes |
+| Ubuntu GNOME | StatusNotifierItem — the AppIndicator extension ships enabled | Yes |
+| Other GNOME | Window, until `gnome-shell-extension-appindicator` is installed; then SNI | Depends |
 
-GNOME is the common Linux default, and its replacement (StatusNotifierItem, over DBus) is
-not something AWT speaks; the AppIndicator extension does not bridge to it either. Nothing
-in `VaultService` depends on any of this, so supporting those desktops is a replacement for
-`TrayApp` — a DBus implementation, or a library like dorkbox SystemTray — rather than a
-rewrite. `SystemTray.isSupported()` is checked at startup; when it is false the `WindowFrontend`
-takes over — a small persistent window with the status line and the same menu as buttons,
-which quits on close. `TrayApp` is the controller and draws nothing; `Frontend` is the
-seam, and `TrayModel` the menu as data that every frontend renders. The StatusNotifierItem
-frontend that puts an icon back on Ubuntu and KDE is planned in
-[GNOME-TRAY-PLAN.md](GNOME-TRAY-PLAN.md). `VAULTGUARD_FRONTEND=window` forces the window
-on a desktop that has a tray, for trying it.
+GNOME removed XEmbed in 3.26, and stock GNOME shows StatusNotifierItems only through the
+AppIndicator extension; see [GNOME-TRAY-PLAN.md](GNOME-TRAY-PLAN.md) for the decisions and
+what has and has not been verified on a real desktop. `TrayApp` is the controller and draws
+nothing; `Frontend` is the seam, and `TrayModel` the menu as data that every frontend
+renders, so the three menus cannot drift. When nothing can draw an icon the
+`WindowFrontend` is the application: a small persistent window with the status line and
+the same menu as buttons, which quits on close. `VAULTGUARD_FRONTEND=window|sni|awt`
+forces one, for trying it.
 
 ### Writing from the desktop
 

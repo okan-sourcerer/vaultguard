@@ -29,6 +29,7 @@ googleGmsGoogleServices = "4.4.4"
 mockk = "1.13.13"
 json = "20240303"
 flatlaf = "3.6"
+dbusJava = "5.2.1"
 javaxInject = "1"
 
 [libraries]
@@ -108,6 +109,8 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 # need a genuine implementation on the test classpath.
 json = { group = "org.json", name = "json", version.ref = "json" }
 flatlaf = { group = "com.formdev", name = "flatlaf", version.ref = "flatlaf" }
+dbus-java-core = { group = "com.github.hypfvieh", name = "dbus-java-core", version.ref = "dbusJava" }
+dbus-java-unixsocket = { group = "com.github.hypfvieh", name = "dbus-java-transport-native-unixsocket", version.ref = "dbusJava" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

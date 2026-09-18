@@ -42,6 +42,12 @@ dependencies {
     // falls back without). Nothing in it touches the vault; it draws widgets.
     implementation(libs.flatlaf)
 
+    // StatusNotifierItem on Linux (docs/GNOME-TRAY-PLAN.md). The native-unixsocket
+    // transport uses the JDK's own Unix-domain sockets: pure Java, no JNR or JNI in the
+    // process that holds the vault. Loaded only when a session bus is found.
+    implementation(libs.dbus.java.core)
+    implementation(libs.dbus.java.unixsocket)
+
     testImplementation(libs.junit)
     // FakeSecurePrefs, so a test can drive MasterPasswordManager exactly as the phone does
     // when it publishes a vault config, rather than hand-rolling the key hierarchy.

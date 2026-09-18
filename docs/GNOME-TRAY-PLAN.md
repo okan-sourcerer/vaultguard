@@ -61,13 +61,14 @@ Two frontends: `AwtTrayFrontend`, the existing behaviour; and `WindowFrontend`, 
 persistent window with the status line and the menu as buttons, which is the application
 when nothing else can draw an icon. Selection at startup:
 
-1. `SystemTray.isSupported()` → AWT (Windows, macOS, KDE, XFCE, Cinnamon, MATE).
-2. *(Phase 2)* a `StatusNotifierWatcher` on the session bus → SNI.
+1. A `StatusNotifierWatcher` on the session bus → SNI (Linux; checked first, since it is
+   the one GNOME shows).
+2. `SystemTray.isSupported()` → AWT (Windows, macOS, and X11 desktops without a watcher).
 3. Otherwise → window.
 
 Nothing in `VaultService` changes. The controller is tested with a fake frontend.
 
-### Phase 2 — the SNI item (2 days)
+### Phase 2 — the SNI item (done, awaiting a desktop)
 
 - `org.kde.StatusNotifierItem`: `Category=ApplicationStatus`, `Id=vaultguard`,
   `IconPixmap` as ARGB from `VaultIcon` (locked and unlocked; `NewIcon` on change),
@@ -79,18 +80,35 @@ Nothing in `VaultService` changes. The controller is tested with a fake frontend
   changes. This is the fiddly half; KDE and the GNOME extension read the spec slightly
   differently, and both are test targets.
 
-### Phase 3 — Linux notifications (half a day)
+### Phase 3 — Linux notifications (done, awaiting a desktop)
 
 `TrayIcon.displayMessage` goes with XEmbed. `org.freedesktop.Notifications.Notify` with a
 `default` action and the `ActionInvoked` signal gives click-to-open, which is the
 notification policy already in force (ARCHITECTURE.md, "One action: Open"). The same call
 serves the window frontend.
 
-### Phase 4 — packaging and documentation (half a day)
+### Phase 4 — packaging and documentation
 
-`.deb` gets `Recommends: gnome-shell-extension-appindicator`; `.rpm` the Fedora package
-name. README and ARCHITECTURE say which desktops show an icon without help and which need
-the extension.
+README and ARCHITECTURE say which desktops show an icon without help and which need the
+extension. A `Recommends:` on `gnome-shell-extension-appindicator` is not something
+jpackage can express (`--linux-package-deps` is `Depends`, and depending on a GNOME
+extension from a package KDE users install would be wrong); it stays a documented step.
+
+## What is done and what is not
+
+Implemented: `desktop/.../service/sni/` — the DBus interfaces, `MenuLayout` (the
+`TrayModel` as a dbusmenu tree, pure), `SniFrontend` (item, menu, watcher registration and
+re-registration, notifications with a `default` action). `Frontend.select()` prefers SNI
+whenever a `StatusNotifierWatcher` owns its name on the session bus.
+
+Tested: `MenuLayoutTest` on every platform; `SniFrontendTest` against a private
+`dbus-daemon` with a fake watcher and a fake notification server, on the Linux CI runner
+(it skips itself elsewhere). That covers the wire: registration, `Activate`, `GetLayout`,
+`Event`, `LayoutUpdated`, `Notify`, `ActionInvoked`.
+
+**Not yet done: the manual pass on a real desktop.** Ubuntu GNOME (Wayland), KDE Plasma,
+Fedora GNOME with the extension. Until that has happened the honest status of the Linux
+tray is "believed to work", per CLAUDE.md's rule about platform behaviour.
 
 ## Testing
 

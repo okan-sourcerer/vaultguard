@@ -44,7 +44,9 @@ built by [the release workflow](.github/workflows/release.yml):
 | Linux | [VaultGuard-linux.deb](../../releases/latest/download/VaultGuard-linux.deb) · [VaultGuard-linux.rpm](../../releases/latest/download/VaultGuard-linux.rpm) |
 
 The desktop installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper
-warn before the first run. The desktop client needs a vault the phone has published to
+warn before the first run. On Linux the tray icon needs a StatusNotifier host: KDE, XFCE,
+Cinnamon, MATE and Ubuntu's GNOME have one; other GNOME needs the
+`gnome-shell-extension-appindicator` package, and until then VaultGuard runs as a window. The desktop client needs a vault the phone has published to
 cloud sync; it has no local database of its own. The browser extension is loaded unpacked
 for now — see [extension/README.md](extension/README.md).
 
