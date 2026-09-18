@@ -123,7 +123,11 @@ class VaultService(
     /**
      * Signs in if needed, unlocks, and fetches.
      *
-     * @return true if the vault is now open.
+     * @return true only when the vault is open *and* its first fetch succeeded.
+     *
+     * A key that has been derived but whose rows could not be fetched is not a usable
+     * unlocked vault. Leaving [open] set in that state made a transient network error look
+     * exactly like an empty vault to both the tray and browser extension.
      */
     fun unlock(
         askPassword: (String) -> CharArray?,
@@ -136,6 +140,12 @@ class VaultService(
         open = opened
         touch()
         val fetched = refresh(warn)
+        if (!fetched) {
+            // This is the initial load, so there is no trustworthy cached snapshot to keep.
+            // Drop the key and return to LOCKED rather than serving an empty vault.
+            lock()
+            return false
+        }
         onStateChanged(state)
         return fetched
     }

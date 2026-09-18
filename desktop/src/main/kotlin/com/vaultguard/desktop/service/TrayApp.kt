@@ -30,7 +30,8 @@ class TrayApp(
 
     // Lazy so a test can drive the controller without a display: Swing components are
     // created when a window is first shown, not when the controller is.
-    private val search by lazy { SearchDialog(service, clipboard) }
+    private val searchLazy = lazy { SearchDialog(service, clipboard) }
+    private val search by searchLazy
     private val feedback = FeedbackDialog()
     private val updater = Updater(stateDirectory)
     private val settings = SettingsDialog(updater, onQuit = { quit() })
@@ -100,7 +101,13 @@ class TrayApp(
             bridge.stop()
             return false
         }
-        service.onStateChanged = { render() }
+        service.onStateChanged = { state ->
+            // Search rows and editor fields are decrypted Swing state outside VaultService.
+            // They must disappear on every lock path: manual tray lock, idle lock, sign-out,
+            // or a browser-extension lock request.
+            if (state != ServiceState.UNLOCKED && searchLazy.isInitialized()) search.closeForLock()
+            render()
+        }
         render()
 
         // A minute is fine: the policy decides, this only asks. Checking every second would

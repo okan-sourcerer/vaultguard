@@ -45,12 +45,24 @@ class CredentialDialog(
     private val password = JPasswordField(26)
     private val strength = JLabel(" ")
 
+    /** The modal editor currently on screen, if any. */
+    private var activeDialog: JDialog? = null
+
     /** Null when creating; the entry being changed otherwise. */
     private var editing: Credential? = null
 
     fun createNew(owner: JDialog?) = show(owner, null)
 
     fun edit(owner: JDialog?, credential: Credential) = show(owner, credential)
+
+    /** Closes an edit/create form and clears its password field when the vault locks. */
+    fun closeForLock() {
+        SwingUtilities.invokeLater {
+            activeDialog?.dispose()
+            activeDialog = null
+            clearFields()
+        }
+    }
 
     private fun show(owner: JDialog?, credential: Credential?) {
         SwingUtilities.invokeLater {
@@ -63,6 +75,7 @@ class CredentialDialog(
             describe()
 
             val dialog = JDialog(owner, if (credential == null) "New entry" else "Edit entry", true)
+            activeDialog = dialog
             dialog.iconImages = VaultIcon.windowIcons(locked = false)
             dialog.contentPane.add(buildForm(dialog), BorderLayout.CENTER)
             dialog.minimumSize = Dimension(430, 240)
@@ -73,6 +86,7 @@ class CredentialDialog(
             // The dialog is modal, so this runs once it closes. The fields outlive it as
             // members, and they hold a password.
             clearFields()
+            activeDialog = null
         }
     }
 

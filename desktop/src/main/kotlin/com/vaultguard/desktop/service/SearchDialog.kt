@@ -68,6 +68,21 @@ class SearchDialog(
         }
     }
 
+    /**
+     * Revokes this window's view of decrypted rows when the vault locks.
+     *
+     * Hiding a Swing dialog is not enough: its list model remains live and the copy buttons
+     * can still read the credentials held by its rows if the window is brought back. This is
+     * deliberately safe to call from the bridge or auto-lock threads.
+     */
+    fun closeForLock() {
+        SwingUtilities.invokeLater {
+            editor.closeForLock()
+            dialog.isVisible = false
+            forget()
+        }
+    }
+
     private fun build() {
         if (dialog.contentPane.componentCount > 0) return
 
