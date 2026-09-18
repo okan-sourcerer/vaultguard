@@ -166,7 +166,7 @@ class SniFrontend(
         override fun getObjectPath(): String = MENU_PATH
         override fun isRemote(): Boolean = false
 
-        override fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): LayoutReply {
+        override fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): LayoutReply<UInt32, LayoutItem> {
             val full = MenuLayout.layout(model)
             val subtree = if (parentId == MenuLayout.ROOT_ID) full else LayoutItem(parentId, MenuLayout.properties(model, parentId), emptyList())
             return LayoutReply(UInt32(revision.get()), subtree)
@@ -191,7 +191,7 @@ class SniFrontend(
 
         override fun AboutToShow(id: Int): Boolean = false
 
-        override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply =
+        override fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply<List<Int>, List<Int>> =
             AboutToShowGroupReply(emptyList(), emptyList())
 
         private val properties: Map<String, Variant<*>> = mapOf(

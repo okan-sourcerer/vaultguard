@@ -81,27 +81,34 @@ class MenuEvent(
     @field:Position(3) val timestamp: UInt32
 ) : Struct()
 
+/*
+ * Multi-value replies. dbus-java derives a Tuple's wire types from the *method's* return
+ * type parameters, not from the fields (it reads those raw, and a raw `List` is refused),
+ * so a Tuple has to be generic and the method has to say `LayoutReply<UInt32, LayoutItem>`.
+ * The CI DBus test is what found this.
+ */
+
 /** The two-value reply of `GetLayout`: `u(ia{sv}av)`. */
-class LayoutReply(
-    @field:Position(0) val revision: UInt32,
-    @field:Position(1) val layout: LayoutItem
+class LayoutReply<R, L>(
+    @field:Position(0) val revision: R,
+    @field:Position(1) val layout: L
 ) : Tuple()
 
 /** The two-value reply of `AboutToShowGroup`: `ai ai`. */
-class AboutToShowGroupReply(
-    @field:Position(0) val updatesNeeded: List<Int>,
-    @field:Position(1) val idErrors: List<Int>
+class AboutToShowGroupReply<A, B>(
+    @field:Position(0) val updatesNeeded: A,
+    @field:Position(1) val idErrors: B
 ) : Tuple()
 
 @DBusInterfaceName("com.canonical.dbusmenu")
 interface DBusMenu : DBusInterface {
-    fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): LayoutReply
+    fun GetLayout(parentId: Int, recursionDepth: Int, propertyNames: List<String>): LayoutReply<UInt32, LayoutItem>
     fun GetGroupProperties(ids: List<Int>, propertyNames: List<String>): List<ItemProperties>
     fun GetProperty(id: Int, name: String): Variant<*>
     fun Event(id: Int, eventId: String, data: Variant<*>, timestamp: UInt32)
     fun EventGroup(events: List<MenuEvent>): List<Int>
     fun AboutToShow(id: Int): Boolean
-    fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply
+    fun AboutToShowGroup(ids: List<Int>): AboutToShowGroupReply<List<Int>, List<Int>>
 
     class ItemsPropertiesUpdated(
         path: String,

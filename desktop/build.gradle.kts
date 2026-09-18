@@ -54,6 +54,15 @@ dependencies {
     testImplementation(testFixtures(project(":core")))
 }
 
+tasks.withType<Test> {
+    // The message and the top of the stack in the console, not only in an XML report that
+    // the CI job has to be told to upload.
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        events("failed", "skipped")
+    }
+}
+
 /**
  * The identifiers a downloaded copy needs to reach the vault, baked into the jar.
  *
