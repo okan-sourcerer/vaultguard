@@ -176,7 +176,8 @@ entry point the build uses; given a `.png` path it writes one of those instead, 
 ### The installers
 
 `gradlew :desktop:packageInstaller` is the same `jpackage` invocation with a different
-`--type`: `.msi` on Windows, `.dmg` on macOS, `.deb` on Linux. Per-user, with a Start Menu
+`--type`: `.msi` on Windows, `.dmg` on macOS, `.deb` on Linux — or `.rpm`, named with
+`-Pvaultguard.installerType=rpm`, built on the same Ubuntu runner with `rpmbuild` installed. Per-user, with a Start Menu
 entry and an *Apps & features* entry, so it installs and uninstalls the way anything else
 does. Windows Installer recognises a newer MSI as an upgrade through a fixed
 `--win-upgrade-uuid`; changing that constant would make every version install beside the
@@ -198,7 +199,7 @@ that the application could not be found, from inside the application.
 
 Nothing signs the installers. Windows SmartScreen and macOS Gatekeeper both warn about
 unsigned downloads; that needs a code-signing certificate, which is a purchase rather than a
-build change. The GitHub Actions release workflow builds all three on the matching runners
+build change. The GitHub Actions release workflow builds all four on the matching runners
 and attaches them, with the Android APK, to a release for each `v*` tag.
 
 ### Running at login

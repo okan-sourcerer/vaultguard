@@ -167,8 +167,8 @@ stable first; a Run key pointing into a deleted build fails silently at the next
 ```
 
 The installer for the platform the build runs on: `.msi` (needs WiX 3 on the PATH), `.dmg`,
-or `.deb`, under `desktop/build/installer/`. `.github/workflows/release.yml` builds all
-three plus the signed APK for every `v*` tag and attaches them to a GitHub Release. An
+or `.deb`, under `desktop/build/installer/`; `-Pvaultguard.installerType=rpm` on a Linux
+with `rpmbuild`. `.github/workflows/release.yml` builds all four plus the signed APK for every `v*` tag and attaches them to a GitHub Release. An
 installed copy has two launchers: `VaultGuard` (windowed, the tray) and `vaultguard-cli`
 (console, for every `--` command). Run `vaultguard-cli --install-service --at-login` after
 installing so the Run key points at the installed copy rather than at `build/`.

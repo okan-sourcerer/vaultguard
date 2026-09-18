@@ -92,7 +92,11 @@ jobs:
           - os: macos-latest
             label: macos
           - os: ubuntu-latest
-            label: linux
+            label: linux-deb
+            type: deb
+          - os: ubuntu-latest
+            label: linux-rpm
+            type: rpm
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -115,8 +119,15 @@ jobs:
             choco install wixtoolset --version 3.14.1 -y --no-progress
             echo "/c/Program Files (x86)/WiX Toolset v3.14/bin" >> "$GITHUB_PATH"
           fi
+      # jpackage builds an .rpm on any Linux that has rpmbuild; no Fedora runner needed.
+      - name: Install rpmbuild
+        if: matrix.type == 'rpm'
+        run: sudo apt-get update && sudo apt-get install -y rpm
       - name: Build the installer
-        run: ./gradlew :desktop:packageInstaller -Pvaultguard.version=${{ needs.version.outputs.version }}
+        run: >
+          ./gradlew :desktop:packageInstaller
+          -Pvaultguard.version=${{ needs.version.outputs.version }}
+          ${{ matrix.type && format('-Pvaultguard.installerType={0}', matrix.type) || '' }}
       - name: List what jpackage produced
         run: ls -l desktop/build/installer
       - uses: actions/upload-artifact@v4
@@ -126,6 +137,7 @@ jobs:
             desktop/build/installer/*.msi
             desktop/build/installer/*.dmg
             desktop/build/installer/*.deb
+            desktop/build/installer/*.rpm
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

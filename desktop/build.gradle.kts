@@ -55,9 +55,9 @@ dependencies {
  * - `packageApp` — an `app-image`: a directory that can be run in place or copied, and
  *   nothing has to be installed to try it. What `--install-service --to` copies.
  * - `packageInstaller` — what a person downloads: an `.msi` on Windows, a `.dmg` on macOS,
- *   a `.deb` on Linux. The MSI needs the WiX 3 toolset on the PATH; the other two need
- *   nothing beyond the JDK. Per user, with a Start Menu entry and an Apps & features
- *   entry so it can be removed the ordinary way.
+ *   a `.deb` or `.rpm` on Linux. The MSI needs the WiX 3 toolset on the PATH and the RPM
+ *   needs `rpmbuild`; the others need nothing beyond the JDK. Per user, with a Start Menu
+ *   entry and an Apps & features entry so it can be removed the ordinary way.
  *
  * The image carries two launchers. `VaultGuard` is a windowed process — no console — and
  * starts the tray service when double-clicked. `vaultguard-cli` is the same program with a
@@ -190,12 +190,14 @@ val packageApp by tasks.registering(Exec::class) {
 }
 
 val packageInstaller by tasks.registering(Exec::class) {
-    description = "Builds the installer for this platform (msi, dmg or deb) with jpackage."
+    description = "Builds the installer for this platform (msi, dmg, deb or rpm) with jpackage."
     group = "distribution"
     dependsOn(tasks.named("installDist"), writeIcon, cliLauncherProperties)
 
     val outputDir = layout.buildDirectory.dir("installer").get().asFile
-    val type = when {
+    // Linux has two package formats and one runner builds both, so the type can be named:
+    // `-Pvaultguard.installerType=rpm`. Needs `rpm-build` (the `rpm` package on Debian).
+    val type = (findProperty("vaultguard.installerType") as String?) ?: when {
         os.isWindows -> "msi"
         os.isMacOsX -> "dmg"
         else -> "deb"
@@ -206,12 +208,16 @@ val packageInstaller by tasks.registering(Exec::class) {
         outputDir.mkdirs()
         // jpackage's own message when WiX is missing is "Can not find WiX tools", with no
         // hint of what to install. Checked first, and named.
-        if (type == "msi" && System.getenv("PATH").orEmpty().split(File.pathSeparator)
-                .none { File(it, "light.exe").exists() && File(it, "candle.exe").exists() }
-        ) {
+        val path = System.getenv("PATH").orEmpty().split(File.pathSeparator)
+        if (type == "msi" && path.none { File(it, "light.exe").exists() && File(it, "candle.exe").exists() }) {
             throw GradleException(
                 "Building an .msi needs the WiX 3 toolset (candle.exe and light.exe) on the " +
                     "PATH, and it is not there. Install WiX 3.14 and add its bin directory."
+            )
+        }
+        if (type == "rpm" && path.none { File(it, "rpmbuild").exists() }) {
+            throw GradleException(
+                "Building an .rpm needs rpmbuild on the PATH. On Debian or Ubuntu: apt-get install rpm."
             )
         }
     }
