@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VaultGuard",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Fills and saves passwords with your VaultGuard vault, via the VaultGuard desktop service.",
   "permissions": [
     "nativeMessaging",
@@ -28,6 +28,9 @@
           "none"
         ]
       }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   },
   "content_scripts": [
