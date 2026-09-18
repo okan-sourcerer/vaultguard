@@ -152,6 +152,7 @@ private class CloudBrowser(
                 "add" -> add()
                 "edit" -> edit(parts.getOrNull(1))
                 "delete", "rm" -> delete(parts.getOrNull(1))
+                "export" -> export(parts.drop(1).joinToString(" "))
                 "quit", "exit", "q" -> return
                 else -> println("Unknown command: ${parts[0]}. Try `help`.")
             }
@@ -168,6 +169,7 @@ private class CloudBrowser(
         add             create an entry and write it to the cloud vault
         edit <n>        change an entry's fields
         delete <n>      soft-delete an entry (the phone can still undo it)
+        export <file>   write the vault as a backup file the phone can import
         quit            exit
 
         Writes are checked against the version that was fetched. If the phone has
@@ -349,6 +351,62 @@ private class CloudBrowser(
     }
 
     /** The row an entry was read from, or null with an explanation if there is not one. */
+    /**
+     * The cloud vault as a v2 backup file, under a password of its own.
+     *
+     * This is how a vault moves to a phone that cannot open the cloud copy - one set up
+     * fresh under a different master password, say. The phone imports the file into its
+     * own vault, and a fresh sync publishes that.
+     *
+     * Refused if any row failed to decrypt, like both phone exports (rule 7 in CLAUDE.md):
+     * a backup that silently omits entries is worse than none, because someone will
+     * delete the cloud copy on the strength of it.
+     */
+    private fun export(argument: String) {
+        val path = argument.trim().takeIf { it.isNotEmpty() }
+        if (path == null) {
+            println("Give a file name: export vaultguard_backup.json")
+            return
+        }
+        if (snapshot.undecryptableCount > 0) {
+            println(
+                "Not exported: ${snapshot.undecryptableCount} entries could not be decrypted, " +
+                    "and a backup missing entries is worse than none."
+            )
+            return
+        }
+        if (snapshot.items.isEmpty()) {
+            println("Nothing to export: the vault is empty.")
+            return
+        }
+        val file = java.io.File(path)
+        if (file.exists()) {
+            if (!confirm("${file.path} exists. Overwrite it?")) return
+        }
+
+        val password = readMasterPassword("Backup password to write under: ") ?: return
+        val again = readMasterPassword("Confirm: ")
+        if (again == null || !password.contentEquals(again)) {
+            password.fill('\u0000')
+            again?.fill('\u0000')
+            println("Passwords do not match. Nothing written.")
+            return
+        }
+        again.fill('\u0000')
+
+        print("Deriving key and writing... ")
+        System.out.flush()
+        try {
+            BackupFile.write(file, BackupVault(snapshot.items), password)
+        } catch (e: Exception) {
+            println()
+            System.err.println("Not written: ${e.message}")
+            return
+        }
+        println("wrote ${snapshot.items.size} entries to ${file.absolutePath}")
+        println("On the phone: Settings > Import Vault, this file, this backup password.")
+    }
+
     private fun rowFor(credential: Credential): com.vaultguard.desktop.cloud.RemoteCredentialRow? {
         val row = rowsById[credential.id]
         if (row?.updateTime == null) {
